@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/* Register --vvh as a typed custom property so CSS transitions work on it */
+@property --vvh {
+  syntax: '<length>';
+  initial-value: 100dvh;
+  inherits: true;
+}
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: #0d1117;
+  }
+
+  #root { height: 100%; overflow: hidden; }
+
+  /* ── Global scrollbar styling ─────────────────────────────────────────────── */
+  ::-webkit-scrollbar              { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track        { background: transparent; }
+  ::-webkit-scrollbar-thumb        { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover  { background: var(--muted-foreground); }
+  ::-webkit-scrollbar-corner       { background: transparent; }
+
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+}
+
+/* ── shadcn/ui CSS variables — values are raw hex/oklch, set directly from JS ─ */
+:root {
+  --background:             #0d1117;
+  --foreground:             #c9d1d9;
+  --card:                   #161b22;
+  --card-foreground:        #c9d1d9;
+  --popover:                #161b22;
+  --popover-foreground:     #c9d1d9;
+  --primary:                #58a6ff;
+  --primary-foreground:     #0d1117;
+  --secondary:              #1c2128;
+  --secondary-foreground:   #c9d1d9;
+  --muted:                  #1c2128;
+  --muted-foreground:       #8b949e;
+  --accent:                 #1f252d;
+  --accent-foreground:      #c9d1d9;
+  --destructive:            #f85149;
+  --destructive-foreground: #c9d1d9;
+  --border:                 #30363d;
+  --input:                  #30363d;
+  --ring:                   #58a6ff;
+  --radius:                 0.5rem;
+
+  /* Semantic extras */
+  --success:                #3fb950;
+  --warning:                #d29922;
+  --session-active-bg:      #1f2d3d;
+}
+
+@theme inline {
+  --color-background:             var(--background);
+  --color-foreground:             var(--foreground);
+  --color-card:                   var(--card);
+  --color-card-foreground:        var(--card-foreground);
+  --color-popover:                var(--popover);
+  --color-popover-foreground:     var(--popover-foreground);
+  --color-primary:                var(--primary);
+  --color-primary-foreground:     var(--primary-foreground);
+  --color-secondary:              var(--secondary);
+  --color-secondary-foreground:   var(--secondary-foreground);
+  --color-muted:                  var(--muted);
+  --color-muted-foreground:       var(--muted-foreground);
+  --color-accent:                 var(--accent);
+  --color-accent-foreground:      var(--accent-foreground);
+  --color-destructive:            var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:                 var(--border);
+  --color-input:                  var(--input);
+  --color-ring:                   var(--ring);
+  --color-success:                var(--success);
+  --color-warning:                var(--warning);
+  /* Cap radii so pill-radius themes (e.g. Twitter's 9999px) don't break menus */
+  --radius-sm: min(calc(var(--radius) - 4px), 0.5rem);
+  --radius-md: min(calc(var(--radius) - 2px), 0.625rem);
+  --radius-lg: min(var(--radius), 0.75rem);
+  --radius-xl: min(calc(var(--radius) + 4px), 1rem);
+}
+
+/* ── Lucide icons ────────────────────────────────────────────────────────────── */
+[data-lucide], svg.lucide {
+  display: inline-block; vertical-align: middle;
+  width: 1em; height: 1em; stroke: currentColor;
+  fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ── Logo ───────────────────────────────────────────────────────────────────── */
+.logo { font-size: 15px; font-weight: 600; color: var(--foreground); letter-spacing: -0.3px; }
+
+/* ── Status dot ─────────────────────────────────────────────────────────────── */
+.status-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted-foreground); flex-shrink: 0; transition: background 0.3s;
+}
+.status-dot.connected    { background: var(--success); }
+.status-dot.disconnected { background: var(--destructive); }
+.status-dot.connecting   { background: var(--warning); }
+.status-text { font-size: 11px; color: var(--muted-foreground); }
+
+/* ── Desktop session list ───────────────────────────────────────────────────── */
+
+.empty-state { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
+
+.session-group-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px 3px 16px;
+  font-size: 10px; font-weight: 600; color: var(--primary);
+  text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8;
+}
+.session-group-header:not(:first-child) { margin-top: 6px; }
+.session-group-label {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+
+.session-item {
+  position: relative;
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s;
+}
+.session-item:hover  { background: var(--accent); }
+.session-item.active { background: var(--session-active-bg); border-left-color: var(--ring); }
+.session-info        { min-width: 0; flex: 1; overflow: hidden; }
+
+@keyframes pulse-busy {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.session-name {
+  font-size: 13px; color: var(--foreground); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.session-item.busy .session-name {
+  color: var(--warning);
+  animation: pulse-busy 1.2s ease-in-out infinite;
+}
+.session-preview {
+  font-family: monospace; font-size: 10px; color: var(--muted-foreground); margin-top: 3px;
+  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+  height: 28px; opacity: 0.75; line-height: 1.4;
+}
+.session-time {
+  font-size: 10px; color: var(--muted-foreground); margin-top: 2px; opacity: 0.5;
+}
+.session-path {
+  font-size: 10px; color: var(--muted-foreground); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Mobile bottom sheet ────────────────────────────────────────────────────── */
+#sheet-session-list .session-item { padding: 12px 16px; }
+#sheet-session-list .session-close { opacity: 1; }
+
+/* ── Terminal ───────────────────────────────────────────────────────────────── */
+#terminal { position: absolute; inset: 0; padding: 8px; overflow: hidden; }
+#terminal .xterm-viewport { overflow-y: scroll !important; overscroll-behavior: none; touch-action: pan-y; }
+#terminal .xterm-screen  { touch-action: pan-y; }
+
+
+/* ── Placeholder ────────────────────────────────────────────────────────────── */
+.placeholder {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--background);
+  color: var(--muted-foreground); font-size: 14px; pointer-events: none;
+}
+.placeholder-inner { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.placeholder-icon  { font-size: 40px; opacity: 0.3; }
+
+/* ── Session name slide-in (mobile top bar) ──────────────────────────────────── */
+@keyframes session-name-slide {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.session-name-slide {
+  animation: session-name-slide 0.2s ease forwards;
+}
+
+/* ── Logs modal body ─────────────────────────────────────────────────────────── */
+.settings-logs-body {
+  background: var(--background); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px; max-height: 65vh; overflow-y: auto;
+  font-family: monospace; font-size: 11px; line-height: 1.5;
+}
+.log-entry { white-space: pre-wrap; word-break: break-all; }
+.log-entry.ERROR, .log-entry.CRITICAL { color: var(--destructive); }
+.log-entry.WARNING { color: var(--warning); }
+.log-entry.INFO    { color: var(--muted-foreground); }
+.log-entry.DEBUG   { color: var(--muted); }
