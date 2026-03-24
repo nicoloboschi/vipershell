@@ -232,7 +232,7 @@ export class MemoryStore {
 
   // ── Memory operations ───────────────────────────────────────────────────────
 
-  async retain(content: string, documentId: string, tags: string[], context: string): Promise<void> {
+  async retain(content: string, _documentId: string, tags: string[], context: string): Promise<void> {
     if (!this.client) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

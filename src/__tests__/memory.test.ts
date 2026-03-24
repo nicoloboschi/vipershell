@@ -1,21 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs'
-import { join } from 'path'
-import { tmpdir } from 'os'
-
-// We test MemoryStore by pointing CONFIG_PATH to a temp dir.
-// Since CONFIG_PATH is hardcoded in the module, we test the public API
-// using a real temp file to avoid non-configurable fs property issues.
-
-const CONFIG_DEFAULTS = {
-  hindsightEnabled: false,
-  llmProvider: 'mock',
-  llmApiKey: '',
-  llmModel: '',
-  retainChunkChars: 3000,
-  observationsEnabled: false,
-  uiPort: 18765,
-}
+import { describe, it, expect } from 'vitest'
 
 // Import directly — CONFIG_PATH is fixed, we test behavior
 import { MemoryStore } from '../memory.js'

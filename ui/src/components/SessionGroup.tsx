@@ -46,7 +46,7 @@ export default function SessionGroup({ path, sessions, onConnect, send, onAddToP
         <span className="session-group-label" title={fullPath ?? undefined}>
           {displayPath}
         </span>
-        <BranchBadge sessionId={sessions[0]?.id} />
+        <BranchBadge sessionId={sessions[0]?.id ?? ''} />
         <Button
           variant="ghost"
           size="icon"

@@ -357,7 +357,7 @@ interface SearchResultProps {
   query: string;
 }
 
-function SearchResult({ result, cwd, isActive, onClick, query }: SearchResultProps) {
+function SearchResult({ result, isActive, onClick, query }: SearchResultProps) {
   // Highlight matching text
   const highlightSearchText = (text: string): React.ReactNode => {
     if (!query) return text;
@@ -423,7 +423,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
   const grouped: Record<string, SearchResultData[]> = {};
   for (const r of results) {
     if (!grouped[r.file]) grouped[r.file] = [];
-    grouped[r.file].push(r);
+    grouped[r.file]!.push(r);
   }
 
   const doSearch = useCallback(async (q: string, g: string) => {
@@ -657,7 +657,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       } catch { errors++; }
     }
     const msg = errors === 0
-      ? (files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
+      ? (files.length === 1 ? `Uploaded ${files[0]!.name}` : `Uploaded ${files.length} files`)
       : `${errors} upload(s) failed`;
     setUploadMsg(msg);
     setTimeout(() => setUploadMsg(null), 3000);

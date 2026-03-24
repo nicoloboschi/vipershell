@@ -80,14 +80,14 @@ function Sparkline({ data, color }: SparklineProps): React.ReactElement {
 
   const id = `sg${color.replace(/[^a-z0-9]/gi, '')}`;
   const linePath = segs
-    .map(seg => seg.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(''))
+    .map(seg => seg.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0]!.toFixed(1)},${p[1]!.toFixed(1)}`).join(''))
     .join('');
   const last = segs[segs.length - 1] ?? [];
   const areaPath = last.length > 1
     ? [
-        ...last.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`),
-        `L${last[last.length - 1][0].toFixed(1)},${H}`,
-        `L${last[0][0].toFixed(1)},${H}`, 'Z',
+        ...last.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0]!.toFixed(1)},${p[1]!.toFixed(1)}`),
+        `L${last[last.length - 1]![0]!.toFixed(1)},${H}`,
+        `L${last[0]![0]!.toFixed(1)},${H}`, 'Z',
       ].join('')
     : '';
 
@@ -132,8 +132,6 @@ function StatWidget({ label, value, unit, history, color }: StatWidgetProps): Re
 }
 
 // ── ProcessList popover ───────────────────────────────────────────────────────
-
-const MAX_CPU_BAR = 100;
 
 interface CpuBarProps {
   pct: number;
@@ -279,7 +277,7 @@ function parseUrl(url: string): ParsedUrl {
   let m: RegExpMatchArray | null;
   if ((m = url.match(GH_PR_RE)))     return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'PR' };
   if ((m = url.match(GH_ISSUE_RE)))  return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'Issue' };
-  if ((m = url.match(GH_COMMIT_RE))) return { favicon: 'https://github.com/favicon.ico', badge: m[3],           label: `${m[1]}/${m[2]}`, sublabel: 'Commit' };
+  if ((m = url.match(GH_COMMIT_RE))) return { favicon: 'https://github.com/favicon.ico', badge: m[3] ?? null,    label: `${m[1]}/${m[2]}`, sublabel: 'Commit' };
   try {
     const u = new URL(url);
     const path = u.pathname.replace(/\/$/, '');
@@ -592,7 +590,7 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
     setMemH(h => [...h.slice(-(HISTORY - 1)), stats.mem_percent]);
   }, [stats]);
 
-  const cpuVal: string | null = cpuH.length > 0 ? cpuH[cpuH.length - 1].toFixed(0) : null;
+  const cpuVal: string | null = cpuH.length > 0 ? cpuH[cpuH.length - 1]!.toFixed(0) : null;
   const memGb: number = stats?.mem_used_gb ?? 0;
   const memVal: string = memGb < 10 ? memGb.toFixed(1) : Math.round(memGb).toString();
   const processes: StatsProcess[] | null = stats?.processes ?? null;

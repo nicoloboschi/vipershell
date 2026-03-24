@@ -127,7 +127,7 @@ export default function PaneTerminal({
       setActiveTab((prev: TabType) => {
         const idx = TABS.indexOf(prev);
         const next = (idx + (dir === 'right' ? 1 : -1) + TABS.length) % TABS.length;
-        return TABS[next];
+        return TABS[next]!;
       });
     });
   }, [paneIndex]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -192,7 +192,7 @@ export default function PaneTerminal({
         let match: RegExpExecArray | null;
         FILE_RE.lastIndex = 0;
         while ((match = FILE_RE.exec(text)) !== null) {
-          const raw = match[1];
+          const raw = match[1]!;
           if (raw.includes('://')) continue; // skip URLs
           const startX = match.index + 1;
           const endX   = match.index + raw.length;
@@ -299,6 +299,11 @@ export default function PaneTerminal({
       } else {
         term.write('\x1b[?25l\r\nConnecting…\r\n');
       }
+      // Re-fit after session switch so terminal dimensions match the container
+      setTimeout(() => {
+        fitAddonRef.current?.fit();
+        if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
+      }, 0);
     }
 
     sendRef.current({ type: 'connect', session_id: sessionId });

@@ -55,14 +55,14 @@ export default function MobileSheet({ onConnect, send }: MobileSheetProps) {
   }, [sheetOpen]);
 
   const handleDragStart = (e: React.TouchEvent) => {
-    dragStartYRef.current = e.touches[0].clientY;
+    dragStartYRef.current = e.touches[0]!.clientY;
     if (sheetRef.current) {
       sheetRef.current.style.transition = 'none';
     }
   };
 
   const handleDragMove = (e: React.TouchEvent) => {
-    const dy = Math.max(0, e.touches[0].clientY - dragStartYRef.current);
+    const dy = Math.max(0, e.touches[0]!.clientY - dragStartYRef.current);
     if (sheetRef.current) {
       sheetRef.current.style.transform = `translateY(${dy}px)`;
     }
@@ -72,7 +72,7 @@ export default function MobileSheet({ onConnect, send }: MobileSheetProps) {
   };
 
   const handleDragEnd = (e: React.TouchEvent) => {
-    const dy = e.changedTouches[0].clientY - dragStartYRef.current;
+    const dy = e.changedTouches[0]!.clientY - dragStartYRef.current;
     if (sheetRef.current) {
       sheetRef.current.style.transition = 'transform 0.3s cubic-bezier(0.32,0.72,0,1)';
     }

@@ -125,11 +125,11 @@
 .session-group-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 4px 6px 2px 12px;
-  gap: 4px; overflow: hidden;
+  gap: 4px;
 }
 .session-group-header:not(:first-child) { margin-top: 6px; }
 .session-group-label {
-  flex: 1; min-width: 0;
+  flex: 1 1 0; min-width: 20px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-size: 10px; font-weight: 500; color: var(--muted-foreground);
   font-family: "Cascadia Code","JetBrains Mono",ui-monospace,monospace;
@@ -140,7 +140,6 @@
   position: relative;
   display: flex; align-items: center; gap: 5px; padding: 5px 6px 5px 10px;
   cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s;
-  overflow: hidden;
 }
 .session-item:hover  { background: var(--accent); }
 .session-item.active { background: var(--session-active-bg); border-left-color: var(--ring); }
@@ -161,7 +160,7 @@
 
 .session-name-inline {
   font-size: 12px; color: var(--foreground);
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 0; min-width: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .session-item.active .session-name-inline { color: var(--foreground); }
 

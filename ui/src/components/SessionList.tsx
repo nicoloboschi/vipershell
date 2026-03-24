@@ -11,7 +11,7 @@ const REPO_COLORS = [
 function repoColor(gitRoot: string): string {
   let h = 0;
   for (let i = 0; i < gitRoot.length; i++) h = (Math.imul(h, 31) + gitRoot.charCodeAt(i)) >>> 0;
-  return REPO_COLORS[h % REPO_COLORS.length];
+  return REPO_COLORS[h % REPO_COLORS.length]!;
 }
 
 interface PathGroup {

@@ -67,15 +67,15 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef, sessionId:
     const getVp = (): Element | null => el.querySelector('.xterm-viewport');
 
     const onTouchStart = (e: TouchEvent): void => {
-      if (e.touches[0].clientX > el.getBoundingClientRect().right - 28) return;
-      lastTouchY = e.touches[0].clientY;
+      if (e.touches[0]!.clientX > el.getBoundingClientRect().right - 28) return;
+      lastTouchY = e.touches[0]!.clientY;
       accPx = 0;
       isTouchScrolling = false;
     };
 
     const onTouchMove = (e: TouchEvent): void => {
-      const dy = lastTouchY - e.touches[0].clientY;
-      lastTouchY = e.touches[0].clientY;
+      const dy = lastTouchY - e.touches[0]!.clientY;
+      lastTouchY = e.touches[0]!.clientY;
       accPx += dy;
       const px = Math.trunc(accPx);
       accPx -= px;

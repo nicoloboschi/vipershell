@@ -1035,7 +1035,7 @@ export const themes: Record<string, ThemeVars> = {
 };
 
 export const themeNames: string[] = Object.keys(themes);
-export const DEFAULT_THEME: string = themeNames[0];
+export const DEFAULT_THEME: string = themeNames[0]!;
 
 export function applyTheme(name: string): void {
   const vars = themes[name] ?? themes[DEFAULT_THEME];
@@ -1043,7 +1043,7 @@ export function applyTheme(name: string): void {
   for (const v of THEME_VARS) {
     root.style.removeProperty(`--${v}`);
   }
-  for (const [key, value] of Object.entries(vars)) {
+  for (const [key, value] of Object.entries(vars!)) {
     root.style.setProperty(`--${key}`, value);
   }
 }

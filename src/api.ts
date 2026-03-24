@@ -81,7 +81,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
             processes = stdout.trim().split('\n').filter(Boolean).map(line => {
               const parts = line.trim().split(/\s+/);
               return {
-                pid: parseInt(parts[0], 10),
+                pid: parseInt(parts[0]!, 10),
                 name: parts[1] ?? '',
                 cpu_percent: parseFloat(parts[2] ?? '0'),
                 mem_mb: parseInt(parts[3] ?? '0', 10) / 1024,
@@ -157,13 +157,13 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
         return res.json({ branch: hash, detached: true, dirty: status.length > 0, ahead: 0, behind: 0 });
       }
 
-      const [behindStr, aheadStr] = aheadBehind.split('\t');
+      const abParts = aheadBehind.split('\t');
       res.json({
         branch,
         detached: false,
         dirty: status.length > 0,
-        ahead: parseInt(aheadStr ?? '0', 10) || 0,
-        behind: parseInt(behindStr ?? '0', 10) || 0,
+        ahead: parseInt(abParts[1] ?? '0', 10) || 0,
+        behind: parseInt(abParts[0] ?? '0', 10) || 0,
       });
     } catch {
       res.json(null);
@@ -189,8 +189,8 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
       const m = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
       if (!m) return res.json(null);
-      const owner = m[1];
-      const repo  = m[2].replace(/\.git$/, '');
+      const owner = m[1]!;
+      const repo  = m[2]!.replace(/\.git$/, '');
       const repoUrl = `https://github.com/${owner}/${repo}`;
 
       const branch = await run('git rev-parse --abbrev-ref HEAD');
@@ -323,8 +323,8 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
         `git -C ${sh(cwd)} log HEAD ${baseRef} --format="%H\x1f%h\x1f%s\x1f%an\x1f%ar\x1f%ad" --date=short -${limit} 2>/dev/null`
       );
       const commits = stdout.trim().split('\n').filter(Boolean).map(line => {
-        const [hash, short, subject, author, relDate, date] = line.split('\x1f');
-        return { hash, short, subject, author, relDate, date };
+        const parts = line.split('\x1f');
+        return { hash: parts[0]!, short: parts[1]!, subject: parts[2]!, author: parts[3]!, relDate: parts[4]!, date: parts[5]! };
       });
       res.json(commits);
     } catch {
@@ -351,7 +351,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       );
       const lines = stdout.split('\n');
       let last = lines.length - 1;
-      while (last > 0 && lines[last].trim() === '') last--;
+      while (last > 0 && lines[last]!.trim() === '') last--;
       const text = last >= 0 ? lines.slice(0, last + 1).map(l => l.trimEnd()).join('\r\n') + '\r\n' : '';
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(text);
@@ -465,9 +465,9 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
         const m = raw.match(/^\.\/(.+?):(\d+):(.*)$/);
         if (m) {
           results.push({
-            file: m[1],
-            line: parseInt(m[2], 10),
-            text: m[3],
+            file: m[1]!,
+            line: parseInt(m[2]!, 10),
+            text: m[3]!,
           });
         }
       }
@@ -551,7 +551,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
     const subpath = (req.params as Record<string, string>)[0];
     const target = new URL(`${memory.apiUrl}/${subpath}`);
-    if (req.url.includes('?')) target.search = req.url.split('?')[1];
+    if (req.url.includes('?')) target.search = req.url.split('?')[1]!;
 
     const proxyHeaders = { ...req.headers };
     delete proxyHeaders['host'];

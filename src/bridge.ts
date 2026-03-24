@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { createWriteStream, existsSync, mkdirSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { createWriteStream, mkdirSync, unlinkSync } from 'fs';
 import type { WriteStream } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -12,8 +12,6 @@ import type { MemoryStore } from './memory.js';
 import os from 'os';
 
 const SCROLLBACK_DIR = join(homedir(), '.config', 'vipershell', 'scrollback');
-const SCROLLBACK_SEND_BYTES = 512 * 1024; // max bytes sent to client on connect
-
 const execAsync = promisify(exec);
 
 // Single-quote a shell argument — safe for tmux session IDs like "$3"
@@ -201,7 +199,7 @@ export class TmuxBridge {
       );
       const lines = stdout.split('\n');
       let last = lines.length - 1;
-      while (last > 0 && lines[last].trim() === '') last--;
+      while (last > 0 && lines[last]!.trim() === '') last--;
       // Strip trailing spaces (prevent wrapping in narrower terminals) and use
       // \r\n so xterm resets to col 0 on each line (bare \n only moves down).
       if (last >= 0) return lines.slice(0, last + 1).map(l => l.trimEnd()).join('\r\n') + '\r\n';

@@ -102,7 +102,7 @@ const useStore = create<StoreState>((set, get) => ({
     for (const s of sorted) {
       if (s.last_activity) {
         const ms = Math.round(s.last_activity * 1000);
-        if (!nextLastEvent[s.id] || ms > nextLastEvent[s.id]) {
+        if (!nextLastEvent[s.id] || ms > nextLastEvent[s.id]!) {
           nextLastEvent[s.id] = ms;
         }
       }

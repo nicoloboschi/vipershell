@@ -40,12 +40,6 @@ interface Commit {
   relDate: string;
 }
 
-interface ParsedUrl {
-  mode: string;
-  base: string;
-  commit: string;
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const isMd = (name: string): boolean =>
@@ -63,8 +57,8 @@ function parseDiff(raw: string): DiffFile[] {
   for (const line of raw.split('\n')) {
     if (line.startsWith('diff --git ')) {
       const m = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-      file = { oldPath: m ? m[1] : '', newPath: m ? m[2] : '', hunks: [], additions: 0, deletions: 0, isNew: false, isDeleted: false, isBinary: false };
-      files.push(file); hunk = null;
+      file = { oldPath: m ? m[1]! : '', newPath: m ? m[2]! : '', hunks: [], additions: 0, deletions: 0, isNew: false, isDeleted: false, isBinary: false };
+      files.push(file!); hunk = null;
     } else if (!file) {
       continue;
     } else if (line.startsWith('new file'))     { file.isNew = true; }
@@ -74,7 +68,7 @@ function parseDiff(raw: string): DiffFile[] {
     else if (line.startsWith('+++ '))           { file.newPath = line.slice(4).replace(/^b\//, ''); }
     else if (line.startsWith('@@ ')) {
       const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
-      if (m) { hunk = { header: line.match(/@@ .* @@/)?.[0] ?? line, context: m[3].trim(), oldStart: +m[1], newStart: +m[2], lines: [] }; file.hunks.push(hunk); }
+      if (m) { hunk = { header: line.match(/@@ .* @@/)?.[0] ?? line, context: m[3]!.trim(), oldStart: +m[1]!, newStart: +m[2]!, lines: [] }; file.hunks.push(hunk); }
     } else if (hunk) {
       if (line.startsWith('+'))      { hunk.lines.push({ type: 'add', content: line.slice(1) }); file.additions++; }
       else if (line.startsWith('-')) { hunk.lines.push({ type: 'del', content: line.slice(1) }); file.deletions++; }
@@ -308,7 +302,7 @@ function CommitList({ sessionId, base, selected, onSelect }: CommitListProps) {
     const url = `/api/git/${encodeURIComponent(sessionId)}/log${base ? `?base=${encodeURIComponent(base)}` : ''}`;
     fetch(url)
       .then(r => r.json())
-      .then((data: Commit[]) => { setCommits(data); if (data.length > 0 && !selected) onSelect(data[0].hash); })
+      .then((data: Commit[]) => { setCommits(data); if (data.length > 0 && !selected) onSelect(data[0]!.hash); })
       .catch(() => setCommits([]))
       .finally(() => setLoading(false));
   }, [sessionId, base]); // eslint-disable-line
@@ -419,7 +413,8 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
       const next = e.key === 'ArrowDown'
         ? Math.min(idx + 1, files.length - 1)
         : Math.max(idx - 1, 0);
-      const path = files[next].isDeleted ? files[next].oldPath : (files[next].newPath || files[next].oldPath);
+      const f = files[next]!;
+      const path = f.isDeleted ? f.oldPath : (f.newPath || f.oldPath);
       const el = diffRef.current?.querySelector(`[data-file="${CSS.escape(path)}"]`);
       el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return next;

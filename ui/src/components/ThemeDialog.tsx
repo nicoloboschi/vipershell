@@ -12,7 +12,7 @@ interface ThemeCardProps {
 }
 
 function ThemeCard({ name, active, onClick }: ThemeCardProps) {
-  const vars: ThemeVars = themes[name];
+  const vars: ThemeVars = themes[name]!;
   return (
     <button
       onClick={onClick}

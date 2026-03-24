@@ -272,13 +272,13 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
   const swipeTouchRef    = useRef<{ x: number; y: number } | null>(null);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    swipeTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    swipeTouchRef.current = { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY };
   }, []);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!swipeTouchRef.current) return;
-    const dx = e.changedTouches[0].clientX - swipeTouchRef.current.x;
-    const dy = e.changedTouches[0].clientY - swipeTouchRef.current.y;
+    const dx = e.changedTouches[0]!.clientX - swipeTouchRef.current.x;
+    const dy = e.changedTouches[0]!.clientY - swipeTouchRef.current.y;
     swipeTouchRef.current = null;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     const nextId = useStore.getState().navigateSession(dx < 0 ? 'down' : 'up');
