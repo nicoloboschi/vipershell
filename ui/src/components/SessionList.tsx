@@ -1,7 +1,9 @@
+import { StickyNote, SquareTerminal } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import SessionGroup from './SessionGroup';
 import { ScrollArea } from './ui/scroll-area';
 import { useGitRoots } from '../hooks/useGit';
+import { NOTES_SESSION_ID } from './PaneTerminal';
 
 const REPO_COLORS = [
   '#58a6ff', '#3fb950', '#d29922', '#bc8cff',
@@ -33,6 +35,7 @@ interface SessionListProps {
 
 export default function SessionList({ onConnect, send, id, onAddToPane }: SessionListProps) {
   const sessions = useStore(s => s.sessions);
+  const currentSessionId = useStore(s => s.currentSessionId);
   const gitRoots = useGitRoots();
 
   if (!sessions.length) {
@@ -86,8 +89,39 @@ export default function SessionList({ onConnect, send, id, onAddToPane }: Sessio
     }));
   }
 
+  const isNotesActive = currentSessionId === NOTES_SESSION_ID;
+
+  const sectionLabelStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 5,
+    padding: '6px 16px 4px', fontSize: 10, fontWeight: 600,
+    color: 'var(--muted-foreground)', textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  };
+
   return (
     <ScrollArea id={id} className="session-list flex-1 py-2">
+      <button
+        onClick={() => onConnect(NOTES_SESSION_ID)}
+        data-session-id={NOTES_SESSION_ID}
+        className="session-item"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          width: '100%', padding: '6px 16px',
+          background: isNotesActive ? 'var(--accent)' : 'none',
+          border: 'none', cursor: 'pointer', textAlign: 'left',
+          color: isNotesActive ? 'var(--foreground)' : 'var(--muted-foreground)',
+          fontSize: 12,
+        }}
+      >
+        <StickyNote size={13} />
+        <span>Notes</span>
+      </button>
+
+      <div style={sectionLabelStyle}>
+        <SquareTerminal size={11} />
+        <span>Sessions</span>
+      </div>
+
       {groups.map(({ gitRoot, pathGroups }) => {
         const linked = pathGroups.length > 1;
         const inner = pathGroups.map(({ path, sessions: ss }) => (

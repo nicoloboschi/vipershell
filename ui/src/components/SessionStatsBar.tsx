@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search } from 'lucide-react';
 import useStore from '../store';
 import StatChips from './StatChips';
+import ClaudeIcon from './ClaudeIcon';
+import { NOTES_SESSION_ID } from './PaneTerminal';
 
 interface SessionStatsBarProps {
   sessionId: string | null;
@@ -18,7 +20,7 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
   const [draftName, setDraftName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  if (!sessionId) return null;
+  if (!sessionId || sessionId === NOTES_SESSION_ID) return null;
   const session = sessionMap[sessionId];
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -114,8 +116,9 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
             className="status-text"
             title="Double-click to rename"
             onDoubleClick={startEdit}
-            style={{ marginRight: 8, cursor: 'default', userSelect: 'none' }}
+            style={{ marginRight: 8, cursor: 'default', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
           >
+            {session?.isClaudeCode ? <ClaudeIcon size={14} /> : <SquareTerminal size={14} style={{ opacity: 0.5 }} />}
             {session?.name ?? ''}
           </span>
         )}

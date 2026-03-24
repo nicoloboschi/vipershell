@@ -1,21 +1,28 @@
 import { useState, useEffect } from 'react';
-import { BrainCircuit, ExternalLink, Terminal, Check, Loader, RotateCw } from 'lucide-react';
+import { BrainCircuit, ExternalLink, Check, Loader, RotateCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 
-const TABS = ['Overview', 'Claude Code', 'Settings'] as const;
+const TABS = ['Overview', 'Settings'] as const;
 type Tab = typeof TABS[number];
 
 const LLM_PROVIDERS = ['mock', 'openai', 'anthropic', 'groq', 'ollama', 'gemini', 'lmstudio', 'openai-codex'] as const;
 const NO_KEY_PROVIDERS = new Set(['mock', 'ollama', 'lmstudio', 'openai-codex']);
 
+type HindsightMode = 'embedded' | 'external';
+
 interface MemoryConfig {
   hindsightEnabled: boolean;
+  hindsightMode: HindsightMode;
+  hindsightApiUrl: string;
+  hindsightApiToken: string;
   llmProvider: string;
   llmApiKey: string;
   llmModel: string;
   retainChunkChars: number;
   observationsEnabled: boolean;
+  active?: boolean;
+  mode?: string;
 }
 
 type AsyncState = 'idle' | 'loading' | 'ok' | 'error';
@@ -26,8 +33,6 @@ interface MemoryDialogProps {
 
 export default function MemoryDialog({ onClose }: MemoryDialogProps) {
   const [tab, setTab] = useState<Tab>('Overview');
-  const [mcpState, setMcpState] = useState<AsyncState>('idle');
-  const [mcpError, setMcpError] = useState('');
 
   const [cfg, setCfg] = useState<MemoryConfig | null>(null);
   const [restartState, setRestartState] = useState<AsyncState>('idle');
@@ -44,19 +49,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     const res = await fetch('/api/memory/ui', { method: 'POST' });
     const { active, url } = await res.json();
     if (active && url) window.open(url, '_blank');
-  }
-
-  async function setupClaudeCode() {
-    setMcpState('loading');
-    setMcpError('');
-    try {
-      const res = await fetch('/api/memory/mcp-setup', { method: 'POST' });
-      const { ok, error } = await res.json();
-      if (ok) { setMcpState('ok'); }
-      else { setMcpState('error'); setMcpError(error || 'Unknown error'); }
-    } catch {
-      setMcpState('error'); setMcpError('Request failed');
-    }
   }
 
   async function saveAndRestart() {
@@ -113,10 +105,22 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                 memory system. Every session is indexed by directory and host, so coding agents can
                 recall what happened in a repo across sessions.
               </p>
+
+              {cfg && (
+                <div className="flex flex-col gap-1 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${cfg.active ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className="text-muted-foreground">
+                      {cfg.active ? `Active (${cfg.mode ?? cfg.hindsightMode})` : cfg.hindsightEnabled ? 'Starting\u2026' : 'Disabled'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <ul className="text-xs text-muted-foreground leading-loose list-disc pl-4">
                 <li>Terminal output is chunked and retained automatically</li>
                 <li>Memories are tagged by working directory and hostname</li>
-                <li>No LLM required &mdash; extraction runs locally</li>
+                <li>Use <strong>embedded</strong> mode (default) or connect to an <strong>external</strong> Hindsight API</li>
               </ul>
               <Button
                 variant="outline"
@@ -130,48 +134,16 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
             </>
           )}
 
-          {tab === 'Claude Code' && (
-            <>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Register vipershell&apos;s memory as an MCP server in Claude Code. Once added,
-                Claude can recall terminal history from any repo using the{' '}
-                <code className="text-xs px-1 py-0.5 rounded bg-muted">recall</code>
-                {' '}and{' '}
-                <code className="text-xs px-1 py-0.5 rounded bg-muted">reflect</code>
-                {' '}tools.
-              </p>
-              <code className="text-xs text-muted-foreground bg-muted rounded px-3 py-2.5 break-all leading-relaxed">
-                claude mcp add --scope user --transport http hindsight{' '}
-                {window.location.origin}/api/hindsight/mcp/
-              </code>
-              {mcpState === 'error' && (
-                <p className="text-xs text-destructive">{mcpError}</p>
-              )}
-              <Button
-                size="sm"
-                className="self-start flex items-center gap-2"
-                onClick={setupClaudeCode}
-                disabled={mcpState === 'loading' || mcpState === 'ok'}
-              >
-                {mcpState === 'loading' && <Loader size={13} className="animate-spin" />}
-                {mcpState === 'ok' && <Check size={13} />}
-                {mcpState === 'idle' && <Terminal size={13} />}
-                {mcpState === 'loading' ? 'Setting up\u2026'
-                  : mcpState === 'ok' ? 'Added to Claude Code'
-                  : 'Add to Claude Code'}
-              </Button>
-            </>
-          )}
-
           {tab === 'Settings' && (
             <>
               {!cfg ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader size={13} className="animate-spin" /> Loading\u2026
+                  <Loader size={13} className="animate-spin" /> Loading&hellip;
                 </div>
               ) : (
                 <>
                   <div className="flex flex-col gap-3">
+                    {/* Enable Hindsight */}
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -182,49 +154,100 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       <span className="text-xs font-medium text-foreground">Enable Hindsight</span>
                     </label>
 
+                    {/* Mode */}
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-foreground">LLM Provider</label>
+                      <label className="text-xs font-medium text-foreground">Mode</label>
                       <select
-                        value={cfg.llmProvider}
-                        onChange={e => setCfg({ ...cfg, llmProvider: e.target.value })}
+                        value={cfg.hindsightMode}
+                        onChange={e => setCfg({ ...cfg, hindsightMode: e.target.value as HindsightMode })}
                         className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground"
                       >
-                        {LLM_PROVIDERS.map(p => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
+                        <option value="embedded">Embedded (local daemon)</option>
+                        <option value="external">External API</option>
                       </select>
-                      {cfg.llmProvider === 'mock' && (
-                        <p className="text-xs text-muted-foreground">Mock mode &mdash; no LLM calls, chunks stored as-is.</p>
-                      )}
-                      {cfg.llmProvider === 'openai-codex' && (
-                        <p className="text-xs text-muted-foreground">Uses <code className="bg-muted px-1 rounded">~/.codex/auth.json</code> &mdash; run <code className="bg-muted px-1 rounded">codex auth login</code> first.</p>
+                      {cfg.hindsightMode === 'embedded' && (
+                        <p className="text-xs text-muted-foreground">Automatically starts a local Hindsight daemon via <code className="bg-muted px-1 rounded">uvx</code>.</p>
                       )}
                     </div>
 
-                    {!NO_KEY_PROVIDERS.has(cfg.llmProvider) && (
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-medium text-foreground">API Key</label>
-                        <input
-                          type="password"
-                          value={cfg.llmApiKey}
-                          onChange={e => setCfg({ ...cfg, llmApiKey: e.target.value })}
-                          placeholder="sk-\u2026"
-                          className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
-                        />
-                      </div>
+                    {/* External API URL */}
+                    {cfg.hindsightMode === 'external' && (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-foreground">API URL</label>
+                          <input
+                            type="text"
+                            value={cfg.hindsightApiUrl}
+                            onChange={e => setCfg({ ...cfg, hindsightApiUrl: e.target.value })}
+                            placeholder="https://hindsight.example.com"
+                            className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-foreground">API Token <span className="text-muted-foreground font-normal">(optional)</span></label>
+                          <input
+                            type="password"
+                            value={cfg.hindsightApiToken}
+                            onChange={e => setCfg({ ...cfg, hindsightApiToken: e.target.value })}
+                            placeholder="Bearer token"
+                            className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
+                          />
+                        </div>
+                      </>
                     )}
 
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-foreground">Model <span className="text-muted-foreground font-normal">(optional)</span></label>
-                      <input
-                        type="text"
-                        value={cfg.llmModel}
-                        onChange={e => setCfg({ ...cfg, llmModel: e.target.value })}
-                        placeholder="default for provider"
-                        className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
-                      />
-                    </div>
+                    {/* LLM Provider — only for embedded mode */}
+                    {cfg.hindsightMode === 'embedded' && (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-foreground">LLM Provider</label>
+                          <select
+                            value={cfg.llmProvider}
+                            onChange={e => setCfg({ ...cfg, llmProvider: e.target.value })}
+                            className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground"
+                          >
+                            {LLM_PROVIDERS.map(p => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                          {cfg.llmProvider === 'mock' && (
+                            <p className="text-xs text-muted-foreground">Mock mode &mdash; no LLM calls, chunks stored as-is.</p>
+                          )}
+                          {cfg.llmProvider === 'openai-codex' && (
+                            <p className="text-xs text-muted-foreground">Uses <code className="bg-muted px-1 rounded">~/.codex/auth.json</code> &mdash; run <code className="bg-muted px-1 rounded">codex auth login</code> first.</p>
+                          )}
+                        </div>
 
+                        {/* API Key */}
+                        {!NO_KEY_PROVIDERS.has(cfg.llmProvider) && (
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium text-foreground">API Key</label>
+                            <input
+                              type="password"
+                              value={cfg.llmApiKey}
+                              onChange={e => setCfg({ ...cfg, llmApiKey: e.target.value })}
+                              placeholder="sk-&hellip;"
+                              className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
+                            />
+                          </div>
+                        )}
+
+                        {/* Model */}
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-foreground">Model <span className="text-muted-foreground font-normal">(optional)</span></label>
+                          <input
+                            type="text"
+                            value={cfg.llmModel}
+                            onChange={e => setCfg({ ...cfg, llmModel: e.target.value })}
+                            placeholder="default for provider"
+                            className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {/* Retain chunk size */}
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-foreground">Retain chunk size <span className="text-muted-foreground font-normal">(chars)</span></label>
                       <input
@@ -237,6 +260,7 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       />
                     </div>
 
+                    {/* Observations */}
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import nodePath from 'path';
 import http from 'http';
 import os from 'os';
@@ -403,6 +403,32 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  // ── Notes ───────────────────────────────────────────────────────────────────
+
+  const NOTES_DIR = nodePath.join(os.homedir(), '.vipershell');
+  const NOTES_PATH = nodePath.join(NOTES_DIR, 'notes.md');
+
+  router.get('/notes', (_req, res) => {
+    try {
+      if (!existsSync(NOTES_PATH)) return res.json({ content: '' });
+      res.json({ content: readFileSync(NOTES_PATH, 'utf-8') });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.put('/notes', (req, res) => {
+    try {
+      const { content } = req.body as { content?: string };
+      if (content === undefined) return res.status(400).json({ error: 'Missing content' });
+      mkdirSync(NOTES_DIR, { recursive: true });
+      writeFileSync(NOTES_PATH, content, 'utf-8');
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   // ── Filesystem browse ────────────────────────────────────────────────────────
 
   const expandHome = (p: string) => p.startsWith('~/') ? nodePath.join(os.homedir(), p.slice(2)) : p === '~' ? os.homedir() : p;
@@ -585,6 +611,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     res.json({
       ...cfg,
       active: memory.active,
+      mode: memory.mode,
       started_at: memory.startedAt,
     });
   });
@@ -595,6 +622,9 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
     memory.saveConfig({
       hindsightEnabled: body.hindsightEnabled !== undefined ? Boolean(body.hindsightEnabled) : cfg.hindsightEnabled,
+      hindsightMode: typeof body.hindsightMode === 'string' && (body.hindsightMode === 'embedded' || body.hindsightMode === 'external') ? body.hindsightMode : cfg.hindsightMode,
+      hindsightApiUrl: typeof body.hindsightApiUrl === 'string' ? body.hindsightApiUrl : cfg.hindsightApiUrl,
+      hindsightApiToken: typeof body.hindsightApiToken === 'string' ? body.hindsightApiToken : cfg.hindsightApiToken,
       llmProvider: typeof body.llmProvider === 'string' ? body.llmProvider : cfg.llmProvider,
       llmApiKey: typeof body.llmApiKey === 'string' ? body.llmApiKey : cfg.llmApiKey,
       llmModel: typeof body.llmModel === 'string' ? body.llmModel : cfg.llmModel,
@@ -608,25 +638,6 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     });
 
     res.json({ ok: true });
-  });
-
-  router.post('/memory/mcp-setup', async (req, res) => {
-    if (!memory.active) return res.json({ ok: false, error: 'Hindsight not running' });
-
-    const host = req.headers.host ?? `localhost:4445`;
-    const mcpUrl = `http://${host}/api/hindsight/mcp/vipershell`;
-    try {
-      const { stdout, stderr } = await execAsync(
-        `claude mcp add --scope user --transport http hindsight ${mcpUrl}`,
-        { timeout: 10_000 }
-      );
-      if (stderr && !stdout) return res.json({ ok: false, error: stderr.trim() });
-      return res.json({ ok: true });
-    } catch (e: unknown) {
-      const err = e as { code?: number; stderr?: string; message?: string };
-      if (err.code === 127) return res.json({ ok: false, error: "'claude' not found in PATH" });
-      return res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
-    }
   });
 
   router.post('/memory/ui', async (req, res) => {

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   Folder, FolderOpen, ChevronLeft, FileCode, FileText, Image,
   FileJson, Film, Music, Archive, File, RefreshCw, Save, Eye, Pencil, Copy, Check,
-  Search, X, Filter, Upload,
+  Search, X, Filter, Upload, FolderRoot,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -52,6 +54,24 @@ function fmtSize(b: number): string {
 }
 
 const ext     = (name: string): string => (name ?? '').split('.').pop()?.toLowerCase() ?? '';
+
+const EXT_LANG: Record<string, string> = {
+  js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
+  c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', cs: 'csharp',
+  sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash',
+  css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
+  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+  sql: 'sql', graphql: 'graphql', gql: 'graphql',
+  dockerfile: 'docker', makefile: 'makefile',
+  swift: 'swift', kt: 'kotlin', scala: 'scala', r: 'r',
+  lua: 'lua', perl: 'perl', php: 'php', dart: 'dart',
+  vue: 'html', svelte: 'html', astro: 'html',
+  md: 'markdown', mdx: 'markdown', tex: 'latex',
+  ini: 'ini', env: 'bash', conf: 'ini', cfg: 'ini',
+  proto: 'protobuf', tf: 'hcl',
+};
+const getLang = (name: string) => EXT_LANG[ext(name)] ?? 'text';
 const isImage = (name: string): boolean => ['png','jpg','jpeg','gif','webp','svg','ico','bmp'].includes(ext(name));
 const isPdf   = (name: string): boolean => ext(name) === 'pdf';
 const isMd    = (name: string): boolean => ['md','markdown','mdx'].includes(ext(name));
@@ -115,22 +135,6 @@ function EntryRow({ entry, selected, onSelect, onNavigate, gitStatus }: EntryPro
 }
 
 // ── Preview / editor ──────────────────────────────────────────────────────────
-
-function highlightText(text: string, query: string): React.ReactNode {
-  if (!query) return text;
-  const parts: React.ReactNode[] = [];
-  let remaining = text;
-  const lowerQuery = query.toLowerCase();
-  let key = 0;
-  let idx: number;
-  while ((idx = remaining.toLowerCase().indexOf(lowerQuery)) !== -1) {
-    if (idx > 0) parts.push(<span key={key++}>{remaining.slice(0, idx)}</span>);
-    parts.push(<span key={key++} style={{ background: '#d2992260', color: '#e3b341', borderRadius: 2, padding: '0 1px' }}>{remaining.slice(idx, idx + query.length)}</span>);
-    remaining = remaining.slice(idx + query.length);
-  }
-  if (remaining) parts.push(<span key={key++}>{remaining}</span>);
-  return parts.length > 0 ? parts : text;
-}
 
 interface FileViewerProps {
   path: string | null;
@@ -312,25 +316,24 @@ function FileViewer({ path, highlightQuery, highlightLine }: FileViewerProps) {
           )}
 
           {textFile && mode === 'preview' && !mdFile && (
-            <div style={{ flex: 1, overflow: 'auto', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 12 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <tbody>
-                  {content.split('\n').map((line, i) => {
-                    const lineNum = i + 1;
-                    const isTarget = highlightLine != null && lineNum === highlightLine;
-                    return (
-                      <tr key={i} ref={isTarget ? highlightRef : undefined} style={isTarget ? { background: 'rgba(210,153,34,0.15)' } : undefined}>
-                        <td style={{ padding: '0 12px', color: isTarget ? '#d29922' : '#484f58', textAlign: 'right', userSelect: 'none', width: 48, flexShrink: 0, verticalAlign: 'top', borderRight: '1px solid #21262d' }}>
-                          {lineNum}
-                        </td>
-                        <td style={{ padding: '0 16px 0 12px', color: '#c9d1d9', whiteSpace: 'pre', verticalAlign: 'top' }}>
-                          {highlightQuery ? highlightText(line || ' ', highlightQuery) : (line || ' ')}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <SyntaxHighlighter
+                language={getLang(path)}
+                style={vscDarkPlus}
+                showLineNumbers
+                wrapLongLines
+                lineNumberStyle={{ minWidth: '3em', paddingRight: 12, color: '#484f58', userSelect: 'none' }}
+                customStyle={{ margin: 0, padding: '8px 0', background: '#0d1117', fontSize: 12, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace' }}
+                lineProps={(lineNum) => {
+                  const isTarget = highlightLine != null && lineNum === highlightLine;
+                  return {
+                    ref: isTarget ? highlightRef : undefined,
+                    style: isTarget ? { background: 'rgba(210,153,34,0.15)', display: 'block' } : { display: 'block' },
+                  };
+                }}
+              >
+                {content}
+              </SyntaxHighlighter>
             </div>
           )}
 
@@ -621,7 +624,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       setEntries(data.entries);
       if (autoReadme) {
         const readme = data.entries.find((e: Entry) => !e.isDir && /^readme\.md$/i.test(e.name));
-        if (readme) setSelectedFile(readme.path);
+        const firstFile = data.entries.find((e: Entry) => !e.isDir);
+        const toOpen = readme ?? firstFile ?? null;
+        if (toOpen) setSelectedFile(toOpen.path);
       }
     } catch (e) {
       console.error(e);
@@ -740,11 +745,18 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           <ChevronLeft size={14} />
         </button>
       ) : null}
-      <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 11, color: '#6e7681', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-        {showBack
-          ? (selectedFile?.split('/').pop() ?? '')
-          : `~${breadcrumbs.length > 0 ? '/' + breadcrumbs.join('/') : ''}`}
-      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+        <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 11, color: '#6e7681', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {showBack
+            ? (selectedFile?.split('/').pop() ?? '')
+            : `~${breadcrumbs.length > 0 ? '/' + breadcrumbs.join('/') : ''}`}
+        </span>
+        {!showBack && cwd && dir !== cwd && (
+          <button onClick={() => browse(cwd)} title="Go to project root" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#484f58', padding: 0, flexShrink: 0 }}>
+            <FolderRoot size={11} />
+          </button>
+        )}
+      </div>
       {!showBack && (
         <button onClick={() => browse(dir)} disabled={loading} title="Refresh" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: loading ? '#484f58' : '#6e7681', flexShrink: 0 }}>
           <RefreshCw size={11} />
@@ -758,6 +770,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       {toolbar(false)}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
+        {!loading && entries.length === 0 && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
         {entries.map(e => (
           <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={selectFile} onNavigate={browse} gitStatus={gitStatus} />
         ))}
@@ -817,6 +830,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: sidebarWidth, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
             {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
+            {!loading && entries.length === 0 && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
             {entries.map(e => (
               <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
             ))}

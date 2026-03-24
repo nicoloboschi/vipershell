@@ -19,7 +19,7 @@ program
     const host = opts.host;
 
     const memory = new MemoryStore();
-    await memory.start();
+    memory.startInBackground();
 
     const bridge = new TmuxBridge();
     bridge.setMemory(memory);

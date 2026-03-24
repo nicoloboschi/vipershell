@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { PanelRight } from 'lucide-react';
+import { PanelRight, SquareTerminal } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import { relativeTime } from '../utils';
+import ClaudeIcon from './ClaudeIcon';
 
 const EMPTY_PANES: number[] = [];
 
@@ -30,7 +31,12 @@ export default function SessionItem({ session, isActive, onConnect, onAddToPane 
       data-session-id={session.id}
       onClick={() => onConnect(session.id)}
     >
-      <span className={`session-state-dot${busy ? ' busy' : ''}`} />
+      <span className={`session-icon${busy ? ' session-icon-busy' : ''}`}>
+        {session.isClaudeCode
+          ? <ClaudeIcon size={12} />
+          : <SquareTerminal size={12} />
+        }
+      </span>
       <span className="session-name-inline">{session.name || '\u2014'}</span>
       <span className="session-time">{time ?? ''}</span>
       {paneIndices.length > 0 && (

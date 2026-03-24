@@ -18,6 +18,9 @@ const mockBridge: TmuxBridge = {
 
 const defaultConfig: MemoryConfig = {
   hindsightEnabled: false,
+  hindsightMode: 'embedded',
+  hindsightApiUrl: '',
+  hindsightApiToken: '',
   llmProvider: 'mock',
   llmApiKey: '',
   llmModel: '',
@@ -29,11 +32,13 @@ const defaultConfig: MemoryConfig = {
 const mockMemory: MemoryStore = {
   get active() { return false },
   get apiUrl() { return 'http://127.0.0.1:9027' },
+  get mode() { return 'embedded' as const },
   get startedAt() { return null },
   get retainChunkChars() { return 3000 },
   getConfig: vi.fn().mockReturnValue(defaultConfig),
   saveConfig: vi.fn(),
   start: vi.fn().mockResolvedValue(undefined),
+  startInBackground: vi.fn(),
   restart: vi.fn().mockResolvedValue(undefined),
   close: vi.fn(),
   retain: vi.fn().mockResolvedValue(undefined),
@@ -122,20 +127,6 @@ describe('POST /api/memory/restart', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as { ok: boolean }
     expect(body).toEqual({ ok: true })
-  })
-})
-
-describe('POST /api/memory/mcp-setup', () => {
-  it('returns { ok: false, error: "Hindsight not running" } when memory not active', async () => {
-    const res = await fetch(`${baseUrl}/memory/mcp-setup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { ok: boolean; error?: string }
-    expect(body.ok).toBe(false)
-    expect(body.error).toBe('Hindsight not running')
   })
 })
 

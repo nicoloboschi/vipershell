@@ -39,6 +39,9 @@ describe.skipIf(!daemonRunning)('Hindsight integration (daemon at 9027)', () => 
       // Override getConfig so hindsightEnabled=true without touching the real config file
       store.getConfig = () => ({
         hindsightEnabled: true,
+        hindsightMode: 'embedded' as const,
+        hindsightApiUrl: '',
+        hindsightApiToken: '',
         llmProvider: 'mock',
         llmApiKey: '',
         llmModel: '',

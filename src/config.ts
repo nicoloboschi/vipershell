@@ -22,6 +22,6 @@ const fileConfig = loadConfig();
 
 export const config: Config = {
   host: process.env.VIPERSHELL_HOST ?? fileConfig.host ?? '0.0.0.0',
-  port: parseInt(process.env.VIPERSHELL_PORT ?? String(fileConfig.port ?? 4445)),
+  port: parseInt(process.env.VIPERSHELL_PORT ?? String(fileConfig.port ?? 4444)),
   logLevel: process.env.VIPERSHELL_LOG_LEVEL ?? fileConfig.logLevel ?? 'info',
 };

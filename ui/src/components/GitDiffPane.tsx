@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   RefreshCw, ChevronDown, ChevronRight, FilePlus, FileMinus, FileCode,
   GitCommitHorizontal, GitBranch, Diff, FolderOpen, Eye,
@@ -47,6 +49,18 @@ const isMd = (name: string): boolean =>
 
 const isImg = (name: string): boolean =>
   ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes((name ?? '').split('.').pop()?.toLowerCase() ?? '');
+
+const EXT_LANG: Record<string, string> = {
+  js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
+  c: 'c', cpp: 'cpp', h: 'c', cs: 'csharp',
+  sh: 'bash', bash: 'bash', zsh: 'bash',
+  css: 'css', scss: 'scss', html: 'html', xml: 'xml',
+  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+  sql: 'sql', swift: 'swift', kt: 'kotlin', php: 'php', dart: 'dart',
+  md: 'markdown', mdx: 'markdown',
+};
+const getLang = (name: string) => EXT_LANG[(name ?? '').split('.').pop()?.toLowerCase() ?? ''] ?? 'text';
 
 // ── Diff parser ───────────────────────────────────────────────────────────────
 
@@ -151,13 +165,17 @@ function FilePreview({ absPath }: FilePreviewProps) {
     </div>
   );
   return (
-    <div style={{ fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace', fontSize: 12, overflowX: 'auto' }}>
-      {content.split('\n').map((line, i) => (
-        <div key={i} style={{ display: 'flex', borderBottom: '1px solid #0d1117' }}>
-          <div style={{ width: 44, padding: '1px 8px', textAlign: 'right', color: '#484f58', userSelect: 'none', flexShrink: 0, borderRight: '1px solid #30363d' }}>{i + 1}</div>
-          <pre style={{ margin: 0, padding: '1px 8px', color: '#c9d1d9', whiteSpace: 'pre-wrap', wordBreak: 'break-all', flex: 1 }}>{line}</pre>
-        </div>
-      ))}
+    <div style={{ overflow: 'auto' }}>
+      <SyntaxHighlighter
+        language={getLang(absPath)}
+        style={vscDarkPlus}
+        showLineNumbers
+        wrapLongLines
+        lineNumberStyle={{ minWidth: '3em', paddingRight: 12, color: '#484f58', userSelect: 'none' }}
+        customStyle={{ margin: 0, padding: '8px 0', background: '#0d1117', fontSize: 12, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace' }}
+      >
+        {content}
+      </SyntaxHighlighter>
     </div>
   );
 }

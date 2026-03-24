@@ -5,7 +5,7 @@ import { requestNotificationPermission } from './utils';
 import { applyTheme } from './themes';
 import { useWebSocket } from './hooks/useWebSocket';
 import Sidebar from './components/Sidebar';
-import PaneTerminal from './components/PaneTerminal';
+import PaneTerminal, { NOTES_SESSION_ID } from './components/PaneTerminal';
 import MobileKeybar from './components/MobileKeybar';
 import ConfirmDialog from './components/ConfirmDialog';
 import LogsModal from './components/LogsModal';
@@ -321,7 +321,7 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
               </span>
             )}
             <span key={currentSessionId} className="session-name-slide flex-1 min-w-0 truncate" style={{ fontSize: 13 }}>
-              {session ? session.name : 'No session'}
+              {currentSessionId === NOTES_SESSION_ID ? 'Notes' : session ? session.name : 'No session'}
             </span>
             {session?.path && (
               <span className="session-path shrink-0" style={{ fontSize: 10, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

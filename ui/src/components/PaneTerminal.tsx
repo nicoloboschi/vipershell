@@ -9,6 +9,7 @@ import TerminalPane from './TerminalPane';
 import SessionStatsBar from './SessionStatsBar';
 import GitDiffPane from './GitDiffPane';
 import FilesPane, { SearchPanel } from './FilesPane';
+import NotesPane from './NotesPane';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger,
@@ -34,6 +35,8 @@ const TERMINAL_THEME = {
  * A self-contained pane: own xterm instance + own WebSocket connection.
  * Handles terminal I/O independently of other panes.
  */
+export const NOTES_SESSION_ID = '__notes__';
+
 const TABS = ['terminal', 'diff', 'files', 'search'] as const;
 type TabType = typeof TABS[number];
 
@@ -231,7 +234,7 @@ export default function PaneTerminal({
         if (!mounted) return;
         delay = 1000;
         fitAddonRef.current?.fit();
-        if (sessionIdRef.current) {
+        if (sessionIdRef.current && sessionIdRef.current !== NOTES_SESSION_ID) {
           sendRef.current({ type: 'connect', session_id: sessionIdRef.current });
         }
       };
@@ -283,10 +286,10 @@ export default function PaneTerminal({
   useEffect(() => {
     const prev = sessionIdRef.current;
     sessionIdRef.current = sessionId;
-    if (!sessionId) return;
+    if (!sessionId || sessionId === NOTES_SESSION_ID) return;
 
     // Save snapshot of the old session before switching
-    if (prev && prev !== sessionId && serializeAddon.current) {
+    if (prev && prev !== sessionId && prev !== NOTES_SESSION_ID && serializeAddon.current) {
       try { snapshotsRef.current.set(prev, serializeAddon.current.serialize()); } catch { /* ignore */ }
     }
 
@@ -330,6 +333,44 @@ export default function PaneTerminal({
   }, [isActive, activeTab]);
 
   const session = sessionMap[sessionId as string];
+  const isNotes = sessionId === NOTES_SESSION_ID;
+
+  // Notes pseudo-session: render only the notes editor, no terminal/tabs
+  if (isNotes) {
+    return (
+      <div
+        className={`flex flex-col flex-1 min-w-0 min-h-0${className ? ` ${className}` : ''}`}
+        style={{ borderLeft: paneIndex > 0 ? '1px solid var(--border)' : undefined, position: 'relative' }}
+        onClick={onActivate}
+      >
+        {showHeader && (
+          <div
+            className="flex items-center shrink-0 px-2 gap-1"
+            style={{
+              height: 26,
+              background: 'var(--card)',
+              borderBottom: `1px solid ${isActive ? 'var(--primary)' : 'var(--border)'}`,
+            }}
+          >
+            <span className="truncate text-xs px-1" style={{ color: 'var(--foreground)' }}>Notes</span>
+            {onRemovePane && (
+              <button
+                title="Close pane"
+                onClick={(e) => { e.stopPropagation(); onRemovePane(paneIndex); }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  color: 'var(--muted-foreground)', flexShrink: 0, display: 'flex', alignItems: 'center',
+                }}
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+        )}
+        <NotesPane />
+      </div>
+    );
+  }
 
   return (
     <div

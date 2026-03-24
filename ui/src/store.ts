@@ -8,6 +8,7 @@ export interface Session {
   path?: string;
   username?: string;
   last_activity?: number;
+  isClaudeCode?: boolean;
 }
 
 export interface ConfirmState {

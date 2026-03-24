@@ -121,6 +121,7 @@
 /* Prevent the Radix scroll viewport from computing width from content,
    which would break text-overflow: ellipsis and push flex items off screen */
 .session-list [data-radix-scroll-area-viewport] { overflow-x: hidden !important; }
+.session-list [data-radix-scroll-area-viewport] > div { display: block !important; min-width: 0 !important; }
 
 .session-group-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -140,6 +141,7 @@
   position: relative;
   display: flex; align-items: center; gap: 5px; padding: 5px 6px 5px 10px;
   cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s;
+  min-width: 0;
 }
 .session-item:hover  { background: var(--accent); }
 .session-item.active { background: var(--session-active-bg); border-left-color: var(--ring); }
@@ -149,18 +151,20 @@
   50%       { opacity: 0.4; }
 }
 
-.session-state-dot {
-  width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
-  background: var(--muted-foreground); opacity: 0.35; transition: background 0.3s, opacity 0.3s;
+.session-icon {
+  display: flex; align-items: center; flex-shrink: 0;
+  color: var(--muted-foreground); opacity: 0.4; transition: opacity 0.3s;
 }
-.session-state-dot.busy {
-  background: var(--warning); opacity: 1;
+.session-icon-busy {
+  opacity: 1; color: var(--warning);
   animation: pulse-busy 1.2s ease-in-out infinite;
 }
+.session-item.active .session-icon { opacity: 0.7; }
+.session-item.active .session-icon-busy { opacity: 1; }
 
 .session-name-inline {
   font-size: 12px; color: var(--foreground);
-  flex: 1 1 0; min-width: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .session-item.active .session-name-inline { color: var(--foreground); }
 

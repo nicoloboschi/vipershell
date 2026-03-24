@@ -29,9 +29,7 @@ npx tsx watch src/index.ts --port 4445 --log-level debug &
 BACKEND_PID=$!
 
 echo ""
-echo "  vipershell dev servers started"
-echo "  UI:      http://localhost:4444"
-echo "  Backend: http://localhost:4445"
+echo "  vipershell dev server started: http://localhost:4444"
 echo ""
 
 wait

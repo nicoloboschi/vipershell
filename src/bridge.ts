@@ -26,6 +26,7 @@ export interface Session {
   username: string;
   last_activity: number;
   busy: boolean;
+  isClaudeCode?: boolean;
 }
 
 interface ManagedSession {
@@ -156,6 +157,16 @@ export class TmuxBridge {
               }
             } catch { /* ignore */ }
           }
+          // Detect Claude Code by checking child process commands
+          let isClaudeCode = false;
+          if (panePid) {
+            try {
+              const { stdout: childCmds } = await execAsync(
+                `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o comm= 2>/dev/null || true`
+              );
+              isClaudeCode = childCmds.split('\n').some(c => /\bclaude\b/i.test(c.trim()));
+            } catch { /* ignore */ }
+          }
           const displayName = (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
             ? paneTitle.trim()
             : name;
@@ -166,6 +177,7 @@ export class TmuxBridge {
             username: os.userInfo().username,
             last_activity: parseInt(activityStr ?? '0', 10),
             busy,
+            isClaudeCode,
           });
         } catch {
           sessions.push({
