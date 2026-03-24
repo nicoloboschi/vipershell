@@ -88,11 +88,10 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     }
   }
 
-  const mcpUrl = `http://${window.location.host}/api/hindsight/mcp/vipershell`;
-  const mcpCommand = `claude mcp add --scope user --transport http hindsight ${mcpUrl}`;
+  const manualCommands = `claude plugin marketplace add vectorize-io/hindsight\nclaude plugin install hindsight-memory\n\n# Then add to ~/.hindsight/claude-code.json:\n# { "hindsightApiUrl": "http://${window.location.host}/api/hindsight" }`;
 
   function copyCommand() {
-    navigator.clipboard.writeText(mcpCommand);
+    navigator.clipboard.writeText(manualCommands);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -174,17 +173,23 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-foreground">Connect to Claude Code</p>
-                  <p className="text-xs text-muted-foreground">Give Claude memory of your terminal sessions</p>
+                  <p className="text-xs text-muted-foreground">Give Claude long-term memory of your terminal sessions</p>
                 </div>
               </div>
 
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Register vipershell&apos;s Hindsight memory as an{' '}
-                <strong className="text-foreground">MCP server</strong> in Claude Code.
-                Once connected, Claude can use the <code className="text-xs px-1 py-0.5 rounded bg-muted">recall</code> and{' '}
-                <code className="text-xs px-1 py-0.5 rounded bg-muted">reflect</code> tools
-                to search your terminal history across all sessions.
+                Install the{' '}
+                <strong className="text-foreground">Hindsight plugin</strong> for Claude Code.
+                It automatically captures conversations and recalls relevant context &mdash;
+                Claude gains memory across all sessions powered by vipershell&apos;s Hindsight.
               </p>
+
+              {/* What it does */}
+              <ul className="text-xs text-muted-foreground leading-loose list-disc pl-4">
+                <li><strong className="text-foreground">Auto-recall</strong> &mdash; queries memories on every prompt, injects relevant context</li>
+                <li><strong className="text-foreground">Auto-retain</strong> &mdash; extracts and stores conversation content after responses</li>
+                <li>Zero dependencies, uses Claude Code&apos;s hook-based plugin system</li>
+              </ul>
 
               {/* Auto-install button */}
               <div
@@ -192,11 +197,14 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                 style={{ background: 'var(--accent)' }}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-foreground">Option 1: Automatic setup</span>
+                  <span className="text-xs font-semibold text-foreground">Automatic setup</span>
                   {!cfg?.active && (
                     <span className="text-xs text-yellow-500">(requires Hindsight to be running)</span>
                   )}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Installs the plugin and configures it to connect to this vipershell instance.
+                </p>
                 {ccState === 'error' && (
                   <p className="text-xs text-destructive break-words">{ccError}</p>
                 )}
@@ -209,25 +217,23 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                   {ccState === 'loading' && <Loader size={13} className="animate-spin" />}
                   {ccState === 'ok' && <Check size={13} />}
                   {(ccState === 'idle' || ccState === 'error') && <ClaudeIcon size={13} />}
-                  {ccState === 'loading' ? 'Setting up\u2026'
-                    : ccState === 'ok' ? 'Added to Claude Code'
-                    : 'Add MCP Server'}
+                  {ccState === 'loading' ? 'Installing\u2026'
+                    : ccState === 'ok' ? 'Installed & configured'
+                    : 'Install Hindsight Plugin'}
                 </Button>
               </div>
 
-              {/* Manual command */}
+              {/* Manual steps */}
               <div className="flex flex-col gap-2">
-                <span className="text-xs font-semibold text-foreground">Option 2: Run manually</span>
+                <span className="text-xs font-semibold text-foreground">Or install manually</span>
                 <div className="relative group">
-                  <code
-                    className="block text-[10px] text-muted-foreground bg-muted rounded-md px-3 py-2.5 pr-9 break-all leading-relaxed font-mono select-all"
-                  >
-                    {mcpCommand}
-                  </code>
+                  <pre
+                    className="text-[10px] text-muted-foreground bg-muted rounded-md px-3 py-2.5 pr-9 leading-relaxed font-mono select-all whitespace-pre-wrap"
+                  >{manualCommands}</pre>
                   <button
                     onClick={copyCommand}
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background/50"
-                    title="Copy command"
+                    title="Copy commands"
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)' }}
                   >
                     {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}

@@ -687,19 +687,62 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     if (!memory.active) return res.json({ ok: false, error: 'Hindsight not running' });
 
     const host = req.headers.host ?? 'localhost:4445';
-    const mcpUrl = `http://${host}/api/hindsight/mcp/vipershell`;
+    const hindsightUrl = `http://${host}/api/hindsight`;
+
+    const steps: string[] = [];
+    const errors: string[] = [];
+
+    // Step 1: Add marketplace
     try {
-      const { stdout, stderr } = await execAsync(
-        `claude mcp add --scope user --transport http hindsight ${mcpUrl}`,
-        { timeout: 15_000 }
-      );
-      if (stderr && !stdout) return res.json({ ok: false, error: stderr.trim() });
-      return res.json({ ok: true, mcpUrl });
+      await execAsync('claude plugin marketplace add vectorize-io/hindsight', { timeout: 30_000 });
+      steps.push('marketplace');
     } catch (e: unknown) {
       const err = e as { code?: number; stderr?: string; message?: string };
-      if (err.code === 127) return res.json({ ok: false, error: "'claude' CLI not found in PATH. Install it first: https://docs.anthropic.com/en/docs/claude-code" });
-      return res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+      if (err.code === 127) return res.json({ ok: false, error: "'claude' CLI not found in PATH. Install Claude Code first." });
+      // Marketplace might already be added — continue
+      if (err.stderr?.includes('already') || err.stderr?.includes('exists')) {
+        steps.push('marketplace');
+      } else {
+        errors.push(`Marketplace: ${err.stderr?.trim() || err.message || String(e)}`);
+      }
     }
+
+    // Step 2: Install plugin
+    try {
+      await execAsync('claude plugin install hindsight-memory', { timeout: 30_000 });
+      steps.push('plugin');
+    } catch (e: unknown) {
+      const err = e as { stderr?: string; message?: string };
+      if (err.stderr?.includes('already') || err.stderr?.includes('exists')) {
+        steps.push('plugin');
+      } else {
+        errors.push(`Plugin: ${err.stderr?.trim() || err.message || String(e)}`);
+      }
+    }
+
+    // Step 3: Write config pointing to vipershell's Hindsight proxy
+    try {
+      const configDir = nodePath.join(os.homedir(), '.hindsight');
+      const configPath = nodePath.join(configDir, 'claude-code.json');
+      mkdirSync(configDir, { recursive: true });
+
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(readFileSync(configPath, 'utf-8')); } catch { /* fresh */ }
+
+      const updated = {
+        ...existing,
+        hindsightApiUrl: hindsightUrl,
+      };
+      writeFileSync(configPath, JSON.stringify(updated, null, 2) + '\n');
+      steps.push('config');
+    } catch (e) {
+      errors.push(`Config: ${String(e)}`);
+    }
+
+    if (errors.length > 0) {
+      return res.json({ ok: false, error: errors.join('; '), steps });
+    }
+    return res.json({ ok: true, steps, hindsightUrl });
   });
 
   router.post('/memory/ui', async (req, res) => {

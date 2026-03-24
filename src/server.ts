@@ -90,7 +90,7 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
 
     // Subscribe to session list updates
     state.unsubSessions = bridge.pubsub.subscribe('__sessions__', (msg) => {
-      if (msg.type === 'sessions' || (msg.type === 'preview' && state.sessionId !== null)) {
+      if (msg.type === 'sessions' || msg.type === 'last_command' || msg.type === 'current_input' || (msg.type === 'preview' && state.sessionId !== null)) {
         send(msg);
       }
     });

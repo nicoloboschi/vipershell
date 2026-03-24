@@ -33,7 +33,9 @@ interface SessionListProps {
 }
 
 export default function SessionList({ onConnect, send, id }: SessionListProps) {
-  const sessions = useStore(s => s.sessions);
+  const allSessions = useStore(s => s.sessions);
+  const splitIds = useStore(s => s.splitSessionIds);
+  const sessions = allSessions.filter(s => !splitIds.has(s.id));
   const currentSessionId = useStore(s => s.currentSessionId);
   const gitRoots = useGitRoots();
 

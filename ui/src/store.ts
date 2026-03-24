@@ -30,6 +30,8 @@ export interface StoreState {
   sessionLastCommand: Record<string, string>;
   sessionCurrentInput: Record<string, string>;
   openPaneMap: Record<string, number[]>;
+  /** Session IDs that are terminal splits (hidden from session list) */
+  splitSessionIds: Set<string>;
   wsStatus: WsStatus;
   sheetOpen: boolean;
   confirm: ConfirmState | null;
@@ -48,6 +50,8 @@ export interface StoreState {
   clearSessionUrls: (sessionId: string) => void;
   setLastCommand: (sessionId: string, command: string) => void;
   setCurrentInput: (sessionId: string, input: string) => void;
+  addSplitSession: (sessionId: string) => void;
+  removeSplitSession: (sessionId: string) => void;
   navigateSession: (direction: 'up' | 'down') => string | null;
 }
 
@@ -66,6 +70,7 @@ const useStore = create<StoreState>((set, get) => ({
   sessionLastCommand: {},
   sessionCurrentInput: {},
   openPaneMap: {},
+  splitSessionIds: new Set<string>(),
   wsStatus: 'connecting',
   sheetOpen: false,
   confirm: null,
@@ -199,6 +204,22 @@ const useStore = create<StoreState>((set, get) => ({
 
   setCurrentInput(sessionId: string, input: string) {
     set(s => ({ sessionCurrentInput: { ...s.sessionCurrentInput, [sessionId]: input } }));
+  },
+
+  addSplitSession(sessionId: string) {
+    set(s => {
+      const next = new Set(s.splitSessionIds);
+      next.add(sessionId);
+      return { splitSessionIds: next };
+    });
+  },
+
+  removeSplitSession(sessionId: string) {
+    set(s => {
+      const next = new Set(s.splitSessionIds);
+      next.delete(sessionId);
+      return { splitSessionIds: next };
+    });
   },
 
   navigateSession(direction: 'up' | 'down') {

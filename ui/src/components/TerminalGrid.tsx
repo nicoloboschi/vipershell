@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus } from 'lucide-react';
+import { SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, Loader2 } from 'lucide-react';
 import TerminalCell from './TerminalCell';
+import useStore from '../store';
 
 export type Layout = 'single' | 'horizontal' | 'vertical' | 'quad';
 
@@ -35,58 +36,98 @@ function saveGridState(sessionId: string, layout: Layout, cells: string[]): void
 
 export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, onFileLinkClick }: TerminalGridProps) {
   const [layout, setLayout] = useState<Layout>('single');
-  const [cells, setCells] = useState<string[]>([sessionId]);
+  // cells: string = session ID, null = loading placeholder
+  const [cells, setCells] = useState<(string | null)[]>([sessionId]);
   const [activeCell, setActiveCell] = useState(0);
+  const pendingRef = useRef(0); // track in-flight split creations
 
-  // Reset when session changes
+  // Reset when session changes; clean up old splits
   useEffect(() => {
     const saved = loadGridState(sessionId);
     if (saved && saved.cells.length > 0 && saved.cells[0] === sessionId) {
       setLayout(saved.layout);
       setCells(saved.cells);
+      // Re-register split sessions
+      for (let i = 1; i < saved.cells.length; i++) {
+        if (saved.cells[i]) useStore.getState().addSplitSession(saved.cells[i]!);
+      }
     } else {
       setLayout('single');
       setCells([sessionId]);
     }
     setActiveCell(0);
+
+    // Cleanup: unregister splits when switching away
+    return () => {
+      const stored = loadGridState(sessionId);
+      if (stored) {
+        for (let i = 1; i < stored.cells.length; i++) {
+          if (stored.cells[i]) useStore.getState().removeSplitSession(stored.cells[i]!);
+        }
+      }
+    };
   }, [sessionId]);
 
-  // Persist grid state
+  // Persist grid state (only if no loading placeholders)
   useEffect(() => {
-    saveGridState(sessionId, layout, cells);
+    if (cells.every(c => c !== null)) {
+      saveGridState(sessionId, layout, cells as string[]);
+    }
   }, [sessionId, layout, cells]);
 
   const addSplit = useCallback(async (newLayout: Layout) => {
     const needed = layoutCellCount(newLayout);
     const currentCells = [...cells];
 
-    // Add cells as needed
-    while (currentCells.length < needed) {
-      const newId = await onCreateSplit();
-      if (!newId) return; // Failed to create
-      currentCells.push(newId);
-    }
-
-    // Remove excess cells
+    // Remove excess cells first
     while (currentCells.length > needed) {
       const removed = currentCells.pop()!;
-      if (removed !== sessionId) onCloseSplit?.(removed);
+      if (removed && removed !== sessionId) {
+        useStore.getState().removeSplitSession(removed);
+        onCloseSplit?.(removed);
+      }
     }
+
+    // If we need more, set layout immediately with null placeholders (shows loading)
+    const toCreate = needed - currentCells.length;
+    for (let i = 0; i < toCreate; i++) currentCells.push(null);
 
     setCells(currentCells);
     setLayout(newLayout);
+
+    // Create sessions in background
+    if (toCreate > 0) {
+      pendingRef.current += toCreate;
+      for (let i = needed - toCreate; i < needed; i++) {
+        const idx = i;
+        onCreateSplit().then(newId => {
+          pendingRef.current--;
+          if (newId) {
+            useStore.getState().addSplitSession(newId);
+            setCells(prev => {
+              const next = [...prev];
+              next[idx] = newId;
+              return next;
+            });
+          }
+        });
+      }
+    }
   }, [cells, sessionId, onCreateSplit, onCloseSplit]);
 
   const closeCell = useCallback((index: number) => {
     if (cells.length <= 1) return;
-    const removed = cells[index]!;
+    const removed = cells[index];
     const newCells = cells.filter((_, i) => i !== index);
-    if (removed !== sessionId) onCloseSplit?.(removed);
+    if (removed && removed !== sessionId) {
+      useStore.getState().removeSplitSession(removed);
+      onCloseSplit?.(removed);
+    }
 
     // Determine new layout
     let newLayout: Layout = 'single';
     if (newCells.length === 2) newLayout = layout === 'quad' ? 'horizontal' : layout;
-    if (newCells.length === 3) newLayout = 'quad'; // shouldn't happen but safety
+    if (newCells.length === 3) newLayout = 'quad';
     if (newCells.length >= 4) newLayout = 'quad';
 
     setCells(newCells);
@@ -126,7 +167,17 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
 
   const renderCell = (index: number) => {
     const sid = cells[index];
-    if (!sid) return null;
+    // Loading placeholder
+    if (sid === null || sid === undefined) {
+      return (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: '#0d1117', color: 'var(--muted-foreground)',
+        }}>
+          <Loader2 size={20} className="animate-spin" />
+        </div>
+      );
+    }
     return (
       <TerminalCell
         key={sid}
