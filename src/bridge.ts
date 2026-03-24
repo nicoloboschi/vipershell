@@ -45,7 +45,9 @@ interface MemBuffer {
 export type BridgeMessage =
   | { type: 'sessions'; sessions: Session[] }
   | { type: 'output'; data: string }
-  | { type: 'preview'; session_id: string; preview: string; busy: boolean };
+  | { type: 'preview'; session_id: string; preview: string; busy: boolean }
+  | { type: 'last_command'; session_id: string; command: string }
+  | { type: 'current_input'; session_id: string; input: string };
 
 
 export class TmuxBridge {
@@ -57,6 +59,7 @@ export class TmuxBridge {
   private previewInterval: NodeJS.Timeout | null = null;
   private knownSessions = new Set<string>();
   private memory: MemoryStore | null = null;
+  private inputBuffers = new Map<string, string>();
 
   setMemory(memory: MemoryStore): void {
     this.memory = memory;
@@ -263,6 +266,27 @@ export class TmuxBridge {
   sendInput(sessionId: string, data: string): void {
     const ms = this.managed.get(sessionId);
     if (ms) ms.pty.write(data);
+
+    // Track last command: accumulate printable chars, flush on Enter
+    for (const ch of data) {
+      if (ch === '\r' || ch === '\n') {
+        const cmd = (this.inputBuffers.get(sessionId) ?? '').trim();
+        this.inputBuffers.set(sessionId, '');
+        if (cmd) {
+          this.pubsub.publish('__sessions__', { type: 'last_command', session_id: sessionId, command: cmd });
+        }
+        this.pubsub.publish('__sessions__', { type: 'current_input', session_id: sessionId, input: '' });
+      } else if (ch === '\x7f' || ch === '\b') {
+        // Backspace
+        const cur = this.inputBuffers.get(sessionId) ?? '';
+        this.inputBuffers.set(sessionId, cur.slice(0, -1));
+        this.pubsub.publish('__sessions__', { type: 'current_input', session_id: sessionId, input: this.inputBuffers.get(sessionId) ?? '' });
+      } else if (ch >= ' ' || ch === '\t') {
+        // Printable
+        this.inputBuffers.set(sessionId, (this.inputBuffers.get(sessionId) ?? '') + ch);
+        this.pubsub.publish('__sessions__', { type: 'current_input', session_id: sessionId, input: this.inputBuffers.get(sessionId) ?? '' });
+      }
+    }
   }
 
   resize(sessionId: string, cols: number, rows: number): void {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import nodePath from 'path';
 import http from 'http';
 import os from 'os';
@@ -290,18 +290,38 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const cwd = pathOut.trim();
       if (!cwd) return res.type('text/plain').send('');
 
-      let cmd: string;
+      const run = (cmd: string) => execAsync(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 })
+        .then(r => r.stdout)
+        .catch((e: any) => e.stdout ?? '');
+
+      let diff = '';
       if (mode === 'commit' && commit) {
-        cmd = `git -C ${sh(cwd)} diff ${sh(commit)}^..${sh(commit)} 2>/dev/null`;
+        diff = await run(`git diff ${sh(commit)}^..${sh(commit)}`);
       } else if (mode === 'branch') {
         const baseBranch = base || 'origin/main';
-        cmd = `git -C ${sh(cwd)} diff ${sh(baseBranch)} 2>/dev/null`;
+        // Try the requested base; if it doesn't exist, fall back to HEAD
+        diff = await run(`git diff ${sh(baseBranch)}`);
+        if (!diff) {
+          // Check if base ref exists — if not, show working tree diff instead
+          const refExists = await run(`git rev-parse --verify ${sh(baseBranch)} 2>/dev/null`);
+          if (!refExists) diff = await run('git diff HEAD');
+        }
       } else {
-        cmd = `git -C ${sh(cwd)} diff HEAD 2>/dev/null`;
+        // Working tree: show tracked changes (staged + unstaged)
+        diff = await run('git diff HEAD');
       }
 
-      const { stdout } = await execAsync(cmd);
-      res.type('text/plain; charset=utf-8').send(stdout);
+      // For non-commit modes, append untracked files as synthetic diffs
+      if (mode !== 'commit') {
+        const untrackedOut = await run("git ls-files --others --exclude-standard");
+        const untrackedFiles = untrackedOut.trim().split('\n').filter(Boolean);
+        for (const file of untrackedFiles) {
+          const content = await run(`git diff --no-index /dev/null ${sh(file)}`);
+          if (content) diff += '\n' + content;
+        }
+      }
+
+      res.type('text/plain; charset=utf-8').send(diff);
     } catch {
       res.type('text/plain; charset=utf-8').send('');
     }
@@ -533,6 +553,29 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  router.post('/fs/mkdir', (req, res) => {
+    const dirPath = expandHome(req.query.path as string | undefined ?? '');
+    if (!dirPath) return res.status(400).json({ error: 'Missing path' });
+    try {
+      mkdirSync(dirPath, { recursive: true });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.delete('/fs/delete', (req, res) => {
+    const filePath = expandHome(req.query.path as string | undefined ?? '');
+    if (!filePath) return res.status(400).json({ error: 'Missing path' });
+    if (!existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
+    try {
+      rmSync(filePath, { recursive: false });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   router.get('/fs/raw', (req, res) => {
     const filePath = expandHome(req.query.path as string | undefined ?? '');
     if (!filePath) return res.status(400).send('Missing path');
@@ -638,6 +681,25 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     });
 
     res.json({ ok: true });
+  });
+
+  router.post('/memory/claude-code-setup', async (req, res) => {
+    if (!memory.active) return res.json({ ok: false, error: 'Hindsight not running' });
+
+    const host = req.headers.host ?? 'localhost:4445';
+    const mcpUrl = `http://${host}/api/hindsight/mcp/vipershell`;
+    try {
+      const { stdout, stderr } = await execAsync(
+        `claude mcp add --scope user --transport http hindsight ${mcpUrl}`,
+        { timeout: 15_000 }
+      );
+      if (stderr && !stdout) return res.json({ ok: false, error: stderr.trim() });
+      return res.json({ ok: true, mcpUrl });
+    } catch (e: unknown) {
+      const err = e as { code?: number; stderr?: string; message?: string };
+      if (err.code === 127) return res.json({ ok: false, error: "'claude' CLI not found in PATH. Install it first: https://docs.anthropic.com/en/docs/claude-code" });
+      return res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+    }
   });
 
   router.post('/memory/ui', async (req, res) => {

@@ -27,6 +27,8 @@ export interface StoreState {
   sessionOrder: string[];
   sessionMap: Record<string, Session>;
   sessionUrls: Record<string, string[]>;
+  sessionLastCommand: Record<string, string>;
+  sessionCurrentInput: Record<string, string>;
   openPaneMap: Record<string, number[]>;
   wsStatus: WsStatus;
   sheetOpen: boolean;
@@ -44,6 +46,8 @@ export interface StoreState {
   dismissConfirm: (result: boolean) => void;
   addSessionUrl: (sessionId: string, url: string) => void;
   clearSessionUrls: (sessionId: string) => void;
+  setLastCommand: (sessionId: string, command: string) => void;
+  setCurrentInput: (sessionId: string, input: string) => void;
   navigateSession: (direction: 'up' | 'down') => string | null;
 }
 
@@ -59,6 +63,8 @@ const useStore = create<StoreState>((set, get) => ({
   sessionOrder: [],
   sessionMap: {},
   sessionUrls: {},
+  sessionLastCommand: {},
+  sessionCurrentInput: {},
   openPaneMap: {},
   wsStatus: 'connecting',
   sheetOpen: false,
@@ -185,6 +191,14 @@ const useStore = create<StoreState>((set, get) => ({
     const urls = { ...get().sessionUrls };
     delete urls[sessionId];
     set({ sessionUrls: urls });
+  },
+
+  setLastCommand(sessionId: string, command: string) {
+    set(s => ({ sessionLastCommand: { ...s.sessionLastCommand, [sessionId]: command } }));
+  },
+
+  setCurrentInput(sessionId: string, input: string) {
+    set(s => ({ sessionCurrentInput: { ...s.sessionCurrentInput, [sessionId]: input } }));
   },
 
   navigateSession(direction: 'up' | 'down') {

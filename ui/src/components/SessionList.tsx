@@ -1,4 +1,4 @@
-import { StickyNote, SquareTerminal } from 'lucide-react';
+import { StickyNote } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import SessionGroup from './SessionGroup';
 import { ScrollArea } from './ui/scroll-area';
@@ -30,10 +30,9 @@ interface SessionListProps {
   onConnect: (id: string) => void;
   send: (msg: Record<string, unknown>) => void;
   id?: string;
-  onAddToPane?: ((id: string) => void) | null;
 }
 
-export default function SessionList({ onConnect, send, id, onAddToPane }: SessionListProps) {
+export default function SessionList({ onConnect, send, id }: SessionListProps) {
   const sessions = useStore(s => s.sessions);
   const currentSessionId = useStore(s => s.currentSessionId);
   const gitRoots = useGitRoots();
@@ -91,36 +90,21 @@ export default function SessionList({ onConnect, send, id, onAddToPane }: Sessio
 
   const isNotesActive = currentSessionId === NOTES_SESSION_ID;
 
-  const sectionLabelStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 5,
-    padding: '6px 16px 4px', fontSize: 10, fontWeight: 600,
-    color: 'var(--muted-foreground)', textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  };
-
   return (
     <ScrollArea id={id} className="session-list flex-1 py-2">
-      <button
+      <div className="session-section-label">Notes</div>
+      <div
         onClick={() => onConnect(NOTES_SESSION_ID)}
         data-session-id={NOTES_SESSION_ID}
-        className="session-item"
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          width: '100%', padding: '6px 16px',
-          background: isNotesActive ? 'var(--accent)' : 'none',
-          border: 'none', cursor: 'pointer', textAlign: 'left',
-          color: isNotesActive ? 'var(--foreground)' : 'var(--muted-foreground)',
-          fontSize: 12,
-        }}
+        className={`session-item${isNotesActive ? ' active' : ''}`}
       >
-        <StickyNote size={13} />
-        <span>Notes</span>
-      </button>
-
-      <div style={sectionLabelStyle}>
-        <SquareTerminal size={11} />
-        <span>Sessions</span>
+        <span className="session-icon" style={{ opacity: isNotesActive ? 0.7 : 0.4 }}>
+          <StickyNote size={12} />
+        </span>
+        <span className="session-name-inline">Notes</span>
       </div>
+
+      <div className="session-section-label" style={{ marginTop: 10 }}>Sessions</div>
 
       {groups.map(({ gitRoot, pathGroups }) => {
         const linked = pathGroups.length > 1;
@@ -131,7 +115,6 @@ export default function SessionList({ onConnect, send, id, onAddToPane }: Sessio
             sessions={ss}
             onConnect={onConnect}
             send={send}
-            onAddToPane={onAddToPane}
           />
         ));
         return linked

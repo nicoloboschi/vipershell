@@ -1,5 +1,4 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { Terminal } from 'xterm';
 import useStore from './store';
 import { requestNotificationPermission } from './utils';
 import { applyTheme } from './themes';
@@ -24,120 +23,27 @@ import {
 } from 'lucide-react';
 import { tildefy } from './utils';
 
-// ── Pane layout persistence ──────────────────────────────────────────────────
-
-function loadPanes(): (string | null)[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem('vipershell-panes') || 'null');
-    if (Array.isArray(saved) && saved.length >= 1 && saved.length <= 3) return saved;
-  } catch { /* ignore */ }
-  const last = localStorage.getItem('vipershell-last-session');
-  return [last || null];
-}
-
 // ── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [panes, setPanes]             = useState<(string | null)[]>(loadPanes);
-  const [activePaneIndex, _setActive] = useState(0);
-
-  const panesRef         = useRef(panes);
-  const activePaneIdxRef = useRef(activePaneIndex);
-  useEffect(() => { panesRef.current = panes; }, [panes]);
-  useEffect(() => { activePaneIdxRef.current = activePaneIndex; }, [activePaneIndex]);
-
-  const pane0SendRef  = useRef<(msg: Record<string, unknown>) => void>(() => {});
-  const pane0TermRef  = useRef<Terminal | null>(null);
-  const fitAddonRef   = useRef({ fit: () => {} });
-  const paneTabsRef   = useRef<((dir: 'left' | 'right') => void)[]>([]);
-
-  useEffect(() => {
-    localStorage.setItem('vipershell-panes', JSON.stringify(panes));
-    useStore.getState().setOpenPaneMap(panes);
-  }, [panes]);
-
-  const activePaneSession = panes[activePaneIndex] ?? null;
-  useEffect(() => {
-    useStore.getState().setCurrentSessionId(activePaneSession);
-  }, [activePaneSession]);
-
-  const setActivePaneIndex = useCallback((index: number) => {
-    _setActive(index);
-    const sid = panesRef.current[index];
-    if (sid) useStore.getState().setCurrentSessionId(sid);
-  }, []);
-
-  const connectPaneToSession = useCallback((paneIndex: number, sessionId: string | null) => {
-    const existingIdx = panesRef.current.indexOf(sessionId);
-    if (sessionId && existingIdx !== -1 && existingIdx !== paneIndex) {
-      setActivePaneIndex(existingIdx);
-      return;
-    }
-    setPanes(prev => {
-      const next = [...prev];
-      next[paneIndex] = sessionId;
-      return next;
-    });
-    if (paneIndex === activePaneIdxRef.current) {
-      useStore.getState().setCurrentSessionId(sessionId);
-      if (sessionId) localStorage.setItem('vipershell-last-session', sessionId);
-    }
-  }, [setActivePaneIndex]);
+  const currentSessionId = useStore(s => s.currentSessionId);
+  const tabCycleRef = useRef<((dir: 'left' | 'right') => void) | null>(null);
 
   const connectSession = useCallback((sessionId: string) => {
-    connectPaneToSession(activePaneIdxRef.current, sessionId);
-  }, [connectPaneToSession]);
-
-  const handlePaneSessionChange = useCallback((paneIndex: number, sessionId: string) => {
-    connectPaneToSession(paneIndex, sessionId);
-    setActivePaneIndex(paneIndex);
-  }, [connectPaneToSession, setActivePaneIndex]);
-
-  const handleRemovePane = useCallback((index: number) => {
-    setPanes(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      _setActive(p => Math.min(p, next.length - 1));
-      return next;
-    });
+    useStore.getState().setCurrentSessionId(sessionId);
+    localStorage.setItem('vipershell-last-session', sessionId);
   }, []);
-
-  const setPaneCount = useCallback((count: number) => {
-    setPanes(prev => {
-      if (count === prev.length) return prev;
-      if (count > prev.length) return [...prev, ...Array(count - prev.length).fill(null)];
-      _setActive(p => Math.min(p, count - 1));
-      return prev.slice(0, count);
-    });
-  }, []);
-
-  const addSessionToPane = useCallback((sessionId: string) => {
-    const existingIdx = panesRef.current.indexOf(sessionId);
-    if (existingIdx !== -1) {
-      setActivePaneIndex(existingIdx);
-      return;
-    }
-    setPanes(prev => {
-      const emptyIdx = prev.indexOf(null);
-      if (emptyIdx !== -1) {
-        const next = [...prev];
-        next[emptyIdx] = sessionId;
-        return next;
-      }
-      if (prev.length < 3) return [...prev, sessionId];
-      return prev;
-    });
-  }, [setActivePaneIndex]);
 
   const handleMessage = useCallback((msg: Record<string, unknown>) => {
     const store = useStore.getState();
     switch (msg.type) {
       case 'sessions': {
         store.renderSessions(msg.sessions as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (!panesRef.current[0] && (msg.sessions as any[]).length > 0) {
+        if (!store.currentSessionId && (msg.sessions as any[]).length > 0) {
           const lastId = localStorage.getItem('vipershell-last-session');
           const sessions = msg.sessions as any[];
           const target = (lastId && sessions.find((s: any) => s.id === lastId)) ?? sessions[0];
-          if (target) connectPaneToSession(0, target.id);
+          if (target) connectSession(target.id);
         }
         break;
       }
@@ -149,7 +55,7 @@ export default function App() {
         break;
       default: break;
     }
-  }, [connectSession, connectPaneToSession]);
+  }, [connectSession]);
 
   const handleOpen = useCallback(() => {
     sendRef.current({ type: 'list_sessions' });
@@ -164,6 +70,7 @@ export default function App() {
     return () => document.removeEventListener('click', requestNotificationPermission);
   }, []);
 
+  // Visual viewport handling (mobile keyboard)
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -174,19 +81,14 @@ export default function App() {
       if (Math.abs(h - lastH) < 10 && lastH !== 0) return;
       lastH = h;
       document.documentElement.style.setProperty('--vvh', `${h}px`);
-      setTimeout(() => {
-        fitAddonRef.current?.fit();
-        const term = pane0TermRef.current;
-        const sid  = useStore.getState().currentSessionId;
-        if (term && sid) pane0SendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
-      }, 270);
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
     return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
-  }, []); // eslint-disable-line
+  }, []);
 
+  // Keyboard shortcuts
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
@@ -205,7 +107,7 @@ export default function App() {
       }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        paneTabsRef.current[activePaneIdxRef.current]?.(e.key === 'ArrowRight' ? 'right' : 'left');
+        tabCycleRef.current?.(e.key === 'ArrowRight' ? 'right' : 'left');
         return;
       }
     };
@@ -222,32 +124,19 @@ export default function App() {
         fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13,
       }}
     >
-      <Sidebar onConnect={connectSession} send={send} paneCount={panes.length} onPaneCountChange={setPaneCount} onAddToPane={addSessionToPane} />
+      <Sidebar onConnect={connectSession} send={send} />
 
       <div className="flex flex-col flex-1 min-w-0">
         <MobileTopBar onConnect={connectSession} send={send} />
 
-        <div className="flex flex-row flex-1 min-h-0">
-          {panes.map((sessionId, index) => (
-            <PaneTerminal
-              key={`pane-${index}`}
-              paneIndex={index}
-              sessionId={sessionId}
-              isActive={activePaneIndex === index}
-              onActivate={() => setActivePaneIndex(index)}
-              onSessionChange={handlePaneSessionChange}
-              showHeader={panes.length > 1}
-              onRemovePane={panes.length > 1 ? handleRemovePane : null}
-              onSendReady={index === 0 ? (_: number, fn: (msg: Record<string, unknown>) => void) => { pane0SendRef.current = fn; } : undefined}
-              onTermReady={index === 0 ? (_: number, t: Terminal) => { pane0TermRef.current = t; } : undefined}
-              onTabReady={(i: number, fn: (dir: 'left' | 'right') => void) => { paneTabsRef.current[i] = fn; }}
-              className={index > 0 ? 'hidden md:flex' : undefined}
-              send={send}
-            />
-          ))}
-        </div>
+        <PaneTerminal
+          sessionId={currentSessionId}
+          send={send}
+          onTabReady={(fn) => { tabCycleRef.current = fn; }}
+          onConnect={connectSession}
+        />
 
-        <MobileKeybar sendRef={pane0SendRef} termRef={pane0TermRef} />
+        <MobileKeybar sendRef={sendRef} termRef={{ current: null }} />
       </div>
 
       <ConfirmDialog />

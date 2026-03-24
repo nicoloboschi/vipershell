@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BrainCircuit, ExternalLink, Check, Loader, RotateCw } from 'lucide-react';
+import { BrainCircuit, ExternalLink, Check, Loader, RotateCw, Copy } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
+import ClaudeIcon from './ClaudeIcon';
 
-const TABS = ['Overview', 'Settings'] as const;
+const TABS = ['Overview', 'Claude Code', 'Settings'] as const;
 type Tab = typeof TABS[number];
 
 const LLM_PROVIDERS = ['mock', 'openai', 'anthropic', 'groq', 'ollama', 'gemini', 'lmstudio', 'openai-codex'] as const;
@@ -38,6 +39,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
   const [restartState, setRestartState] = useState<AsyncState>('idle');
   const [restartError, setRestartError] = useState('');
 
+  // Claude Code setup state
+  const [ccState, setCcState] = useState<AsyncState>('idle');
+  const [ccError, setCcError] = useState('');
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     fetch('/api/memory/config')
       .then(r => r.json())
@@ -69,9 +75,31 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     }
   }
 
+  async function setupClaudeCode() {
+    setCcState('loading');
+    setCcError('');
+    try {
+      const res = await fetch('/api/memory/claude-code-setup', { method: 'POST' });
+      const { ok, error } = await res.json();
+      if (ok) { setCcState('ok'); }
+      else { setCcState('error'); setCcError(error || 'Unknown error'); }
+    } catch {
+      setCcState('error'); setCcError('Request failed');
+    }
+  }
+
+  const mcpUrl = `http://${window.location.host}/api/hindsight/mcp/vipershell`;
+  const mcpCommand = `claude mcp add --scope user --transport http hindsight ${mcpUrl}`;
+
+  function copyCommand() {
+    navigator.clipboard.writeText(mcpCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[90vw] max-w-[480px] flex flex-col gap-0 p-0">
+      <DialogContent className="w-[90vw] max-w-[520px] flex flex-col gap-0 p-0">
         <DialogHeader className="px-5 py-4 border-b border-border">
           <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             <BrainCircuit size={15} className="text-primary" />
@@ -85,12 +113,13 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
               key={t}
               onClick={() => setTab(t)}
               className={[
-                'px-4 py-2 text-xs border-b-2 transition-colors bg-transparent cursor-pointer',
+                'px-4 py-2 text-xs border-b-2 transition-colors bg-transparent cursor-pointer flex items-center gap-1.5',
                 tab === t
                   ? 'font-semibold text-foreground border-primary'
                   : 'font-normal text-muted-foreground border-transparent hover:text-foreground',
               ].join(' ')}
             >
+              {t === 'Claude Code' && <ClaudeIcon size={12} />}
               {t}
             </button>
           ))}
@@ -134,6 +163,80 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
             </>
           )}
 
+          {tab === 'Claude Code' && (
+            <>
+              <div className="flex items-center gap-3 mb-1">
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #D4A574 0%, #CC785C 100%)' }}
+                >
+                  <ClaudeIcon size={22} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Connect to Claude Code</p>
+                  <p className="text-xs text-muted-foreground">Give Claude memory of your terminal sessions</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Register vipershell&apos;s Hindsight memory as an{' '}
+                <strong className="text-foreground">MCP server</strong> in Claude Code.
+                Once connected, Claude can use the <code className="text-xs px-1 py-0.5 rounded bg-muted">recall</code> and{' '}
+                <code className="text-xs px-1 py-0.5 rounded bg-muted">reflect</code> tools
+                to search your terminal history across all sessions.
+              </p>
+
+              {/* Auto-install button */}
+              <div
+                className="rounded-lg border border-border p-4 flex flex-col gap-3"
+                style={{ background: 'var(--accent)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">Option 1: Automatic setup</span>
+                  {!cfg?.active && (
+                    <span className="text-xs text-yellow-500">(requires Hindsight to be running)</span>
+                  )}
+                </div>
+                {ccState === 'error' && (
+                  <p className="text-xs text-destructive break-words">{ccError}</p>
+                )}
+                <Button
+                  size="sm"
+                  className="self-start flex items-center gap-2"
+                  onClick={setupClaudeCode}
+                  disabled={ccState === 'loading' || ccState === 'ok' || !cfg?.active}
+                >
+                  {ccState === 'loading' && <Loader size={13} className="animate-spin" />}
+                  {ccState === 'ok' && <Check size={13} />}
+                  {(ccState === 'idle' || ccState === 'error') && <ClaudeIcon size={13} />}
+                  {ccState === 'loading' ? 'Setting up\u2026'
+                    : ccState === 'ok' ? 'Added to Claude Code'
+                    : 'Add MCP Server'}
+                </Button>
+              </div>
+
+              {/* Manual command */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold text-foreground">Option 2: Run manually</span>
+                <div className="relative group">
+                  <code
+                    className="block text-[10px] text-muted-foreground bg-muted rounded-md px-3 py-2.5 pr-9 break-all leading-relaxed font-mono select-all"
+                  >
+                    {mcpCommand}
+                  </code>
+                  <button
+                    onClick={copyCommand}
+                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background/50"
+                    title="Copy command"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)' }}
+                  >
+                    {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
           {tab === 'Settings' && (
             <>
               {!cfg ? (
@@ -143,7 +246,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
               ) : (
                 <>
                   <div className="flex flex-col gap-3">
-                    {/* Enable Hindsight */}
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -154,7 +256,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       <span className="text-xs font-medium text-foreground">Enable Hindsight</span>
                     </label>
 
-                    {/* Mode */}
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-foreground">Mode</label>
                       <select
@@ -170,7 +271,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       )}
                     </div>
 
-                    {/* External API URL */}
                     {cfg.hindsightMode === 'external' && (
                       <>
                         <div className="flex flex-col gap-1">
@@ -197,7 +297,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       </>
                     )}
 
-                    {/* LLM Provider — only for embedded mode */}
                     {cfg.hindsightMode === 'embedded' && (
                       <>
                         <div className="flex flex-col gap-1">
@@ -219,7 +318,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                           )}
                         </div>
 
-                        {/* API Key */}
                         {!NO_KEY_PROVIDERS.has(cfg.llmProvider) && (
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-foreground">API Key</label>
@@ -233,7 +331,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                           </div>
                         )}
 
-                        {/* Model */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-foreground">Model <span className="text-muted-foreground font-normal">(optional)</span></label>
                           <input
@@ -247,7 +344,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       </>
                     )}
 
-                    {/* Retain chunk size */}
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-foreground">Retain chunk size <span className="text-muted-foreground font-normal">(chars)</span></label>
                       <input
@@ -260,7 +356,6 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       />
                     </div>
 
-                    {/* Observations */}
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"

@@ -25,12 +25,32 @@ export default function NotesPane(): JSX.Element {
       .catch(() => setSaving(false));
   }, []);
 
+  // Let Cmd+ArrowUp/Down reach the window handler for session switching
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      e.currentTarget.blur();
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: e.key, metaKey: true, bubbles: true,
+      }));
+    }
+  }, []);
+
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     setContent(text);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => save(text), 500);
   }, [save]);
+
+  // Focus textarea and place cursor at end when content loads
+  useEffect(() => {
+    if (content !== null && textareaRef.current) {
+      const el = textareaRef.current;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+    }
+  }, [content !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save on unmount if pending
   useEffect(() => {
@@ -71,6 +91,7 @@ export default function NotesPane(): JSX.Element {
         ref={textareaRef}
         value={content}
         onChange={handleChange}
+        onKeyDown={handleKeyDown}
         spellCheck={false}
         style={{
           flex: 1,

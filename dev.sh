@@ -15,21 +15,24 @@ fi
 
 cleanup() {
   echo "Shutting down..."
-  kill "$UI_PID" "$BACKEND_PID" 2>/dev/null || true
-  wait "$UI_PID" "$BACKEND_PID" 2>/dev/null || true
+  kill "$BACKEND_PID" "$VITE_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" "$VITE_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# Start Vite dev server
-(cd ui && npm run dev) &
-UI_PID=$!
-
-# Run backend with tsx watch
-npx tsx watch src/index.ts --port 4445 --log-level debug &
+# Backend on port 4445 (API + WebSocket)
+NODE_ENV=development npx tsx watch src/index.ts --port 4445 --log-level debug &
 BACKEND_PID=$!
 
+# Vite dev server on port 4444 (UI + HMR, proxies /api and /ws to backend)
+cd ui && npx vite --host 0.0.0.0 --port 4444 &
+VITE_PID=$!
+cd ..
+
 echo ""
-echo "  vipershell dev server started: http://localhost:4444"
+echo "  vipershell dev:"
+echo "    UI:      http://localhost:4444"
+echo "    Backend: http://localhost:4445"
 echo ""
 
 wait

@@ -16,12 +16,10 @@ export default defineConfig({
     port: 4444,
     host: '0.0.0.0',
     proxy: {
+      '/api': 'http://localhost:4445',
       '/ws': {
         target: 'ws://localhost:4445',
         ws: true,
-      },
-      '/api': {
-        target: 'http://localhost:4445',
       },
     },
   },

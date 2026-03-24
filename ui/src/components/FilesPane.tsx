@@ -6,7 +6,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   Folder, FolderOpen, ChevronLeft, FileCode, FileText, Image,
   FileJson, Film, Music, Archive, File, RefreshCw, Save, Eye, Pencil, Copy, Check,
-  Search, X, Filter, Upload, FolderRoot,
+  Search, X, Filter, Upload, FolderRoot, FilePlus, FolderPlus, Trash2, ClipboardCopy,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -102,8 +102,15 @@ interface EntryProps {
 function EntryRow({ entry, selected, onSelect, onNavigate, gitStatus }: EntryProps) {
   const Icon = getIcon(entry.name, entry.isDir);
   const active = selected === entry.path;
-  const status = gitStatus?.[entry.path];
-  const gitColor = status ? GIT_COLORS[status] : null;
+  const status = gitStatus?.[entry.path] ?? null;
+
+  // For directories, check if any child file has changes
+  const dirHasChanges = entry.isDir && !status && gitStatus
+    ? Object.keys(gitStatus).some(p => p.startsWith(entry.path + '/'))
+    : false;
+
+  const dirChangeColor = dirHasChanges ? '#d29922' : null;
+  const gitColor = status ? GIT_COLORS[status] : dirChangeColor;
   const fileColor = gitColor ?? (entry.isDir ? '#c9d1d9' : '#8b949e');
   const iconColor = gitColor ?? (entry.isDir ? '#79c0ff' : '#8b949e');
   return (
@@ -127,6 +134,9 @@ function EntryRow({ entry, selected, onSelect, onNavigate, gitStatus }: EntryPro
           {GIT_LABELS[status]}
         </span>
       )}
+      {dirHasChanges && (
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d29922', flexShrink: 0 }} />
+      )}
       {!entry.isDir && entry.size > 0 && !status && (
         <span style={{ fontSize: 10, color: '#484f58', flexShrink: 0 }}>{fmtSize(entry.size)}</span>
       )}
@@ -140,9 +150,10 @@ interface FileViewerProps {
   path: string | null;
   highlightQuery?: string | null;
   highlightLine?: number | null;
+  onDelete?: () => void;
 }
 
-function FileViewer({ path, highlightQuery, highlightLine }: FileViewerProps) {
+function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewerProps) {
   const [original,  setOriginal]  = useState('');
   const [content,   setContent]   = useState('');
   const [mode,      setMode]      = useState<'preview' | 'edit'>('preview');
@@ -151,6 +162,7 @@ function FileViewer({ path, highlightQuery, highlightLine }: FileViewerProps) {
   const [error,     setError]     = useState<string | null>(null);
   const [saveMsg,   setSaveMsg]   = useState<string | null>(null);
   const [copied,    setCopied]    = useState(false);
+  const [copiedContent, setCopiedContent] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLTableRowElement>(null);
 
@@ -219,6 +231,26 @@ function FileViewer({ path, highlightQuery, highlightLine }: FileViewerProps) {
     });
   };
 
+  const copyContent = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopiedContent(true);
+      setTimeout(() => setCopiedContent(false), 1500);
+    });
+  };
+
+  const deleteFile = async () => {
+    if (!path) return;
+    if (!window.confirm(`Delete ${path.split('/').pop()}?`)) return;
+    try {
+      const res = await fetch(`/api/fs/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      onDelete?.();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* File toolbar */}
@@ -232,6 +264,26 @@ function FileViewer({ path, highlightQuery, highlightLine }: FileViewerProps) {
           style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copied ? '#3fb950' : '#6e7681', padding: 2, flexShrink: 0 }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+
+        {textFile && (
+          <button
+            onClick={copyContent}
+            title="Copy file content"
+            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copiedContent ? '#3fb950' : '#6e7681', padding: 2, flexShrink: 0 }}
+          >
+            {copiedContent ? <Check size={12} /> : <ClipboardCopy size={12} />}
+          </button>
+        )}
+
+        <button
+          onClick={deleteFile}
+          title="Delete file"
+          style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', padding: 2, flexShrink: 0, marginLeft: 2 }}
+          onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#ff7b72'; }}
+          onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#6e7681'; }}
+        >
+          <Trash2 size={12} />
         </button>
 
         {saveMsg && (
@@ -608,6 +660,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const [gitStatus,    setGitStatus]    = useState<Record<string, string> | null>(null);
   const [isDragOver,   setIsDragOver]   = useState(false);
   const [uploadMsg,    setUploadMsg]    = useState<string | null>(null);
+  const [creating,     setCreating]     = useState<'file' | 'folder' | null>(null);
+  const [createName,   setCreateName]   = useState('');
+  const createInputRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
 
   const browse = useCallback(async (targetPath: string | null, { autoReadme = false }: { autoReadme?: boolean } = {}) => {
@@ -726,6 +781,40 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     onFileSelect?.(path);
   };
 
+  const startCreate = (type: 'file' | 'folder') => {
+    setCreating(type);
+    setCreateName('');
+    setTimeout(() => createInputRef.current?.focus(), 0);
+  };
+
+  const commitCreate = async () => {
+    const name = createName.trim();
+    if (!name || !dir) { setCreating(null); return; }
+    const fullPath = `${dir}/${name}`;
+    try {
+      if (creating === 'folder') {
+        await fetch(`/api/fs/mkdir?path=${encodeURIComponent(fullPath)}`, { method: 'POST' });
+      } else {
+        await fetch(`/api/fs/write?path=${encodeURIComponent(fullPath)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: '' }),
+        });
+      }
+      await browse(dir);
+      if (creating === 'file') selectFile(fullPath);
+    } catch { /* ignore */ }
+    setCreating(null);
+  };
+
+  const handleDelete = useCallback(() => {
+    const deletedFile = selectedFile;
+    setSelectedFile(null);
+    setMobileView('list');
+    if (dir) browse(dir);
+    if (deletedFile) onFileSelect?.(null as any);
+  }, [selectedFile, dir, browse, onFileSelect]);
+
   const breadcrumbs = dir && cwd
     ? (dir.startsWith(cwd) ? dir.slice(cwd.length) : dir).split('/').filter(Boolean)
     : [];
@@ -758,10 +847,46 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         )}
       </div>
       {!showBack && (
-        <button onClick={() => browse(dir)} disabled={loading} title="Refresh" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: loading ? '#484f58' : '#6e7681', flexShrink: 0 }}>
-          <RefreshCw size={11} />
-        </button>
+        <>
+          <button onClick={() => startCreate('file')} title="New file" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', flexShrink: 0, padding: 3 }}>
+            <FilePlus size={15} />
+          </button>
+          <button onClick={() => startCreate('folder')} title="New folder" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', flexShrink: 0, padding: 3 }}>
+            <FolderPlus size={15} />
+          </button>
+          <button onClick={() => browse(dir)} disabled={loading} title="Refresh" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: loading ? '#484f58' : '#6e7681', flexShrink: 0 }}>
+            <RefreshCw size={11} />
+          </button>
+        </>
       )}
+    </div>
+  );
+
+  const createInput = creating && (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 7, padding: '4px 10px',
+      background: '#1c2128', borderBottom: '1px solid #161b22',
+    }}>
+      {creating === 'folder'
+        ? <FolderPlus size={13} color="#79c0ff" style={{ flexShrink: 0 }} />
+        : <FilePlus size={13} color="#8b949e" style={{ flexShrink: 0 }} />}
+      <input
+        ref={createInputRef}
+        value={createName}
+        onChange={e => setCreateName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commitCreate();
+          if (e.key === 'Escape') setCreating(null);
+        }}
+        onBlur={commitCreate}
+        placeholder={creating === 'folder' ? 'folder name' : 'file name'}
+        spellCheck={false}
+        style={{
+          flex: 1, border: 'none', outline: 'none', background: 'transparent',
+          color: '#c9d1d9', fontSize: 12, padding: 0,
+          fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+        }}
+      />
     </div>
   );
 
@@ -769,8 +894,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     <>
       {toolbar(false)}
       <div style={{ flex: 1, overflowY: 'auto' }}>
+        {createInput}
         {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
-        {!loading && entries.length === 0 && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
+        {!loading && entries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
         {entries.map(e => (
           <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={selectFile} onNavigate={browse} gitStatus={gitStatus} />
         ))}
@@ -781,7 +907,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const preview = (
     <>
       {toolbar(true)}
-      <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} />
+      <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
     </>
   );
 
@@ -829,8 +955,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         {toolbar(false)}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <div style={{ width: sidebarWidth, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
+            {createInput}
             {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
-            {!loading && entries.length === 0 && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
+            {!loading && entries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
             {entries.map(e => (
               <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
             ))}
@@ -847,7 +974,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
             />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} />
+            <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
           </div>
         </div>
       </div>

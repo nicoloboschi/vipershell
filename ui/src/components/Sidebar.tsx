@@ -21,12 +21,9 @@ import {
 interface SidebarProps {
   onConnect: (id: string) => void;
   send: (msg: Record<string, unknown>) => void;
-  paneCount?: number;
-  onPaneCountChange?: (count: number) => void;
-  onAddToPane?: ((id: string) => void) | null;
 }
 
-export default function Sidebar({ onConnect, send, paneCount: _paneCount = 1, onPaneCountChange: _onPaneCountChange, onAddToPane }: SidebarProps) {
+export default function Sidebar({ onConnect, send }: SidebarProps) {
   const wsStatus = useStore(s => s.wsStatus);
   const currentSessionId = useStore(s => s.currentSessionId);
   const sessions = useStore(s => s.sessions);
@@ -118,7 +115,6 @@ export default function Sidebar({ onConnect, send, paneCount: _paneCount = 1, on
         id="session-list"
         onConnect={onConnect}
         send={send}
-        onAddToPane={onAddToPane}
       />
 
       <div

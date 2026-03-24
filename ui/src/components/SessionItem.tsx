@@ -1,22 +1,19 @@
 import { useEffect, useState } from 'react';
-import { PanelRight, SquareTerminal } from 'lucide-react';
+import { SquareTerminal } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import { relativeTime } from '../utils';
 import ClaudeIcon from './ClaudeIcon';
-
-const EMPTY_PANES: number[] = [];
 
 interface SessionItemProps {
   session: Session;
   isActive: boolean;
   onConnect: (id: string) => void;
-  onAddToPane?: ((id: string) => void) | null;
 }
 
-export default function SessionItem({ session, isActive, onConnect, onAddToPane }: SessionItemProps) {
+export default function SessionItem({ session, isActive, onConnect }: SessionItemProps) {
   const busy        = useStore(s => s.sessionBusy[session.id] ?? false);
   const lastEvent   = useStore(s => s.sessionLastEvent[session.id] ?? null);
-  const paneIndices = useStore(s => s.openPaneMap?.[session.id] ?? EMPTY_PANES);
+  const lastCommand = useStore(s => s.sessionLastCommand[session.id] ?? null);
   const [, tick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => tick(n => n + 1), 5_000);
@@ -37,22 +34,17 @@ export default function SessionItem({ session, isActive, onConnect, onAddToPane 
           : <SquareTerminal size={12} />
         }
       </span>
-      <span className="session-name-inline">{session.name || '\u2014'}</span>
-      <span className="session-time">{time ?? ''}</span>
-      {paneIndices.length > 0 && (
-        <span className="session-pane-badge" title={`Open in pane ${paneIndices.map(i => i + 1).join(', ')}`}>
-          {paneIndices.map(i => i + 1).join('\u00B7')}
-        </span>
-      )}
-      {onAddToPane && (
-        <button
-          title="Open in new pane"
-          className="session-add-pane-btn"
-          onClick={e => { e.stopPropagation(); onAddToPane(session.id); }}
-        >
-          <PanelRight size={11} />
-        </button>
-      )}
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span className="session-name-inline" style={{ flex: 1 }}>{session.name || '\u2014'}</span>
+          <span className="session-time">{time ?? ''}</span>
+        </div>
+        {lastCommand && (
+          <div style={{ fontSize: 10, color: 'var(--muted-foreground)', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.7, marginTop: 1 }}>
+            {lastCommand}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

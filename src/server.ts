@@ -73,16 +73,15 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
   // REST API
   app.use('/api', createApiRouter(bridge, logBuffer, memory));
 
-  // Static UI (production build)
+  const server = createServer(app);
+
+  // Static UI (production build only — in dev, Vite runs separately)
   const uiDist = join(__dirname, '..', 'ui', 'dist');
-  if (existsSync(uiDist)) {
+  if (existsSync(uiDist) && process.env.NODE_ENV !== 'development') {
     app.use(express.static(uiDist));
     app.get('*', (_req, res) => res.sendFile(join(uiDist, 'index.html')));
-  } else {
-    app.get('/', (_req, res) => res.send('<h2>Run <code>npm run build:ui</code> to build the UI, or use <code>npm run dev</code>.</h2>'));
   }
 
-  const server = createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws: WebSocket) => {

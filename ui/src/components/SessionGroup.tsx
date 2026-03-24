@@ -22,10 +22,9 @@ interface SessionGroupProps {
   sessions: Session[];
   onConnect: (id: string) => void;
   send: (msg: Record<string, unknown>) => void;
-  onAddToPane?: ((id: string) => void) | null;
 }
 
-export default function SessionGroup({ path, sessions, onConnect, send, onAddToPane }: SessionGroupProps) {
+export default function SessionGroup({ path, sessions, onConnect, send }: SessionGroupProps) {
   const currentSessionId = useStore(s => s.currentSessionId);
 
   const fullPath = path ? tildefy(path, sessions[0]?.username) : 'Other';
@@ -63,7 +62,6 @@ export default function SessionGroup({ path, sessions, onConnect, send, onAddToP
           session={session}
           isActive={session.id === currentSessionId}
           onConnect={onConnect}
-          onAddToPane={onAddToPane}
         />
       ))}
     </div>

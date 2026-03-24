@@ -14,22 +14,21 @@ interface SessionStatsBarProps {
 }
 
 export default function SessionStatsBar({ sessionId, send, activeTab, onTabChange, onConnect }: SessionStatsBarProps) {
-  const sessionMap  = useStore(s => s.sessionMap);
-  const showConfirm = useStore(s => s.showConfirm);
+  const sessionMap   = useStore(s => s.sessionMap);
+  const showConfirm  = useStore(s => s.showConfirm);
+  const currentInput = useStore(s => sessionId ? (s.sessionCurrentInput[sessionId] ?? null) : null);
   const [editing, setEditing]     = useState(false);
   const [draftName, setDraftName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  if (!sessionId || sessionId === NOTES_SESSION_ID) return null;
-  const session = sessionMap[sessionId];
-
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => { setEditing(false); }, [sessionId]);
+
+  if (!sessionId || sessionId === NOTES_SESSION_ID) return null;
+  const session = sessionMap[sessionId];
 
   function startEdit() {
     setDraftName(session?.name ?? '');
@@ -123,6 +122,11 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           </span>
         )}
         <StatChips sessionId={sessionId} send={send} />
+        {currentInput && (
+          <span style={{ fontSize: 10, color: 'var(--muted-foreground)', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.6, maxWidth: 300 }} title={currentInput}>
+            {currentInput}
+          </span>
+        )}
         <div className="flex-1" />
         {tabBar && <div className="mr-2">{tabBar}</div>}
         <button
