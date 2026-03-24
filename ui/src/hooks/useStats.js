@@ -1,16 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import useStore from '../store.js';
 
-export function useStats(intervalMs = 2000) {
+export function useStats(sessionId, intervalMs = 2000) {
   const [stats, setStats] = useState(null);
-  const currentSessionId = useStore(s => s.currentSessionId);
   const timerRef = useRef(null);
 
   useEffect(() => {
     async function fetchStats() {
       try {
-        const url = currentSessionId
-          ? `/api/stats?session_id=${encodeURIComponent(currentSessionId)}`
+        const url = sessionId
+          ? `/api/stats?session_id=${encodeURIComponent(sessionId)}`
           : '/api/stats';
         const res = await fetch(url);
         if (res.ok) setStats(await res.json());
@@ -22,7 +20,7 @@ export function useStats(intervalMs = 2000) {
     fetchStats();
     timerRef.current = setInterval(fetchStats, intervalMs);
     return () => clearInterval(timerRef.current);
-  }, [currentSessionId, intervalMs]);
+  }, [sessionId, intervalMs]);
 
   return stats;
 }

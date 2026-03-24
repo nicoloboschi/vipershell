@@ -1,9 +1,10 @@
 import useStore from '../store.js';
 
 const KEYS = [
-  { label: 'Esc',       data: '\x1b' },
-  { label: 'Tab',       data: '\t' },
-  { label: 'Shift+Tab', data: '\x1b[Z' },
+  { label: 'Esc',        data: '\x1b' },
+  { label: 'Tab',        data: '\t' },
+  { label: 'Shift+Tab',  data: '\x1b[Z' },
+  { label: 'Shift+↵',   data: '\x1b\r' },
   { label: '↑',      data: '\x1b[A' },
   { label: '↓',      data: '\x1b[B' },
   { label: '←',      data: '\x1b[D' },
@@ -12,17 +13,41 @@ const KEYS = [
   { label: 'Ctrl+Z', data: '\x1a' },
   { label: 'Ctrl+D', data: '\x04' },
   { label: 'Ctrl+L', data: '\x0c' },
-  { label: 'PgUp',   data: '\x1b[5~' },
-  { label: 'PgDn',   data: '\x1b[6~' },
 ];
 
-export default function MobileKeybar({ sendRef }) {
+const BTN_STYLE = {
+  flexShrink: 0,
+  padding: '3px 10px',
+  borderRadius: 5,
+  border: '1px solid var(--border)',
+  background: 'var(--secondary)',
+  color: 'var(--foreground)',
+  fontSize: 11,
+  fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+  cursor: 'pointer',
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+};
+
+export default function MobileKeybar({ sendRef, termRef }) {
   const currentSessionId = useStore(s => s.currentSessionId);
 
   if (!currentSessionId) return null;
 
   function press(data) {
     sendRef.current({ type: 'input', data });
+  }
+
+  function scrollPage(direction) {
+    const vp = document.querySelector('.terminal-pane .xterm-viewport');
+    if (!vp) return;
+    const term = termRef?.current;
+    const lineH = (term?.options?.fontSize ?? 14) * (term?.options?.lineHeight ?? 1.2);
+    const lines = term ? Math.max(1, term.rows - 1) : 20;
+    vp.scrollTop = Math.max(0, Math.min(
+      vp.scrollTop + direction * lines * lineH,
+      vp.scrollHeight - vp.clientHeight,
+    ));
   }
 
   return (
@@ -34,23 +59,13 @@ export default function MobileKeybar({ sendRef }) {
         <button
           key={k.label}
           onPointerDown={e => { e.preventDefault(); press(k.data); }}
-          style={{
-            flexShrink: 0,
-            padding: '3px 10px',
-            borderRadius: 5,
-            border: '1px solid var(--border)',
-            background: 'var(--secondary)',
-            color: 'var(--foreground)',
-            fontSize: 11,
-            fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
-            cursor: 'pointer',
-            userSelect: 'none',
-            WebkitUserSelect: 'none',
-          }}
+          style={BTN_STYLE}
         >
           {k.label}
         </button>
       ))}
+      <button onPointerDown={e => { e.preventDefault(); scrollPage(-1); }} style={BTN_STYLE}>PgUp</button>
+      <button onPointerDown={e => { e.preventDefault(); scrollPage(+1); }} style={BTN_STYLE}>PgDn</button>
     </div>
   );
 }

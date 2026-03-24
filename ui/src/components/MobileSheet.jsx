@@ -1,12 +1,12 @@
 import { useRef, useEffect, useState } from 'react';
-import { Home, SquarePlus, Zap, TerminalSquare, Settings, BrainCircuit, ScrollText, Palette } from 'lucide-react';
+import { Home, SquarePlus, Zap, TerminalSquare, Settings, ScrollText, Palette, BrainCircuit } from 'lucide-react';
 import useStore from '../store.js';
 import { tildefy } from '../utils.js';
 import SessionList from './SessionList.jsx';
 import CommandsDialog, { loadCommands } from './CommandsDialog.jsx';
-import MemoryDialog from './MemoryDialog.jsx';
 import LogsModal from './LogsModal.jsx';
 import ThemeDialog from './ThemeDialog.jsx';
+import MemoryDialog from './MemoryDialog.jsx';
 import { Button } from './ui/button.jsx';
 import {
   DropdownMenu,
@@ -30,26 +30,10 @@ export default function MobileSheet({ onConnect, send }) {
   const sessions = useStore(s => s.sessions);
   const currentSessionId = useStore(s => s.currentSessionId);
   const [showCommands, setShowCommands] = useState(false);
-  const [showMemory, setShowMemory] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showThemes, setShowThemes] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const [commands, setCommands] = useState(loadCommands);
-  const [hindsightUp, setHindsightUp] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      try {
-        const res = await fetch('/api/hindsight/health');
-        if (!cancelled) setHindsightUp(res.ok);
-      } catch {
-        if (!cancelled) setHindsightUp(false);
-      }
-    }
-    check();
-    const id = setInterval(check, 10000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
 
   const sheetRef = useRef(null);
   const backdropRef = useRef(null);
@@ -146,20 +130,14 @@ export default function MobileSheet({ onConnect, send }) {
         </div>
 
         {showCommands && <CommandsDialog onClose={() => { setShowCommands(false); setCommands(loadCommands()); }} />}
-        {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}
         {showLogs && <LogsModal onClose={() => setShowLogs(false)} />}
         {showThemes && <ThemeDialog onClose={() => setShowThemes(false)} />}
+        {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}
 
         {/* Sheet header */}
         <div className="flex items-center justify-between px-4 pb-2 shrink-0">
           <div className="flex items-center gap-2">
             <span className="logo">Sessions</span>
-            {hindsightUp !== null && (
-              <span
-                title={hindsightUp ? 'Hindsight running' : 'Hindsight not running'}
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${hindsightUp ? 'bg-green-500' : 'bg-red-500'}`}
-              />
-            )}
           </div>
           <div className="flex items-center gap-1">
           <DropdownMenu onOpenChange={(open) => { if (open) setCommands(loadCommands()); }}>

@@ -1,5 +1,9 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
+import type { WriteStream } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import * as pty from 'node-pty';
 import type { IPty } from 'node-pty';
 import { PubSub } from './pubsub.js';
@@ -7,7 +11,15 @@ import { logger } from './server.js';
 import type { MemoryStore } from './memory.js';
 import os from 'os';
 
+const SCROLLBACK_DIR = join(homedir(), '.config', 'vipershell', 'scrollback');
+const SCROLLBACK_SEND_BYTES = 512 * 1024; // max bytes sent to client on connect
+
 const execAsync = promisify(exec);
+
+// Single-quote a shell argument — safe for tmux session IDs like "$3"
+function sh(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
 
 export interface Session {
   id: string;
@@ -36,14 +48,10 @@ export type BridgeMessage =
   | { type: 'output'; data: string }
   | { type: 'preview'; session_id: string; preview: string; busy: boolean };
 
-const SHELL_COMMANDS = new Set(['bash', 'zsh', 'fish', 'sh', 'dash', 'ksh', 'tcsh', 'csh']);
-
-function isShell(cmd: string): boolean {
-  return SHELL_COMMANDS.has(cmd.toLowerCase().replace(/^-/, ''));
-}
 
 export class TmuxBridge {
   private managed = new Map<string, ManagedSession>();
+  private scrollbackStreams = new Map<string, WriteStream>();
   private memBuffers = new Map<string, MemBuffer>();
   readonly pubsub = new PubSub<BridgeMessage>();
   private sessionListInterval: NodeJS.Timeout | null = null;
@@ -56,12 +64,13 @@ export class TmuxBridge {
   }
 
   async start(): Promise<void> {
+    mkdirSync(SCROLLBACK_DIR, { recursive: true });
     // Initial discovery
     await this.discoverSessions();
     // Poll every 2s for new/closed sessions
     this.sessionListInterval = setInterval(() => this.discoverSessions().catch(() => {}), 2000);
-    // Poll every 3s for previews
-    this.previewInterval = setInterval(() => this.publishPreviews().catch(() => {}), 3000);
+    // Poll every 1s for previews (short enough to catch transient CPU spikes from e.g. Claude generating)
+    this.previewInterval = setInterval(() => this.publishPreviews().catch(() => {}), 1000);
     logger.info('TmuxBridge started');
   }
 
@@ -72,6 +81,9 @@ export class TmuxBridge {
       try { ms.pty.kill(); } catch { /* ignore */ }
     }
     this.managed.clear();
+    for (const [id] of this.scrollbackStreams) {
+      this._closeScrollback(id, false);
+    }
     logger.info('TmuxBridge stopped');
   }
 
@@ -88,6 +100,7 @@ export class TmuxBridge {
           try { ms.pty.kill(); } catch { /* ignore */ }
           this.managed.delete(id);
         }
+        this._closeScrollback(id, true);
         await this._flushMemory(id, '');
         this.memBuffers.delete(id);
         logger.debug(`Session closed: ${id}`);
@@ -108,30 +121,57 @@ export class TmuxBridge {
   async listSessions(): Promise<Session[]> {
     try {
       const { stdout } = await execAsync(
-        'tmux list-sessions -F "#{session_name}|#{session_activity}" 2>/dev/null'
+        'tmux list-sessions -F "#{session_id}|#{session_name}|#{session_activity}" 2>/dev/null'
       );
       const lines = stdout.trim().split('\n').filter(Boolean);
       const sessions: Session[] = [];
 
       for (const line of lines) {
-        const [name, activityStr] = line.split('|');
-        if (!name) continue;
+        const [id, name, activityStr] = line.split('|');
+        if (!id || !name) continue;
         try {
           const { stdout: info } = await execAsync(
-            `tmux display-message -t ${JSON.stringify(name)} -p "#{pane_current_path}|#{pane_current_command}" 2>/dev/null`
+            `tmux display-message -t ${sh(id)} -p "#{pane_current_path}|#{session_activity}|#{pane_pid}|#{pane_title}" 2>/dev/null`
           );
-          const [path, cmd] = info.trim().split('|');
+          const [path, paneActivityStr, panePidStr, paneTitle] = info.trim().split('|');
+          const paneActivity = parseInt(paneActivityStr ?? '0', 10);
+          const panePid = parseInt(panePidStr ?? '0', 10);
+          const nowSec = Math.floor(Date.now() / 1000);
+          // Busy if: recent output, OR shell has grandchildren (tool subprocesses),
+          // OR any direct child process has non-trivial CPU usage (e.g. Claude generating text)
+          const recentOutput = (nowSec - paneActivity) < 5;
+          let busy = recentOutput;
+          if (!busy && panePid) {
+            try {
+              // Check grandchildren (active tool execution) and child CPU (active generation)
+              const { stdout: childInfo } = await execAsync(
+                `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o pid=,pcpu= 2>/dev/null || true`
+              );
+              for (const line of childInfo.trim().split('\n').filter(Boolean)) {
+                const [, cpuStr] = line.trim().split(/\s+/);
+                const cpu = parseFloat(cpuStr ?? '0');
+                if (cpu > 5) { busy = true; break; }
+                // Also check grandchildren
+                const [pidStr] = line.trim().split(/\s+/);
+                const { stdout: gc } = await execAsync(`pgrep -P ${pidStr} 2>/dev/null | wc -l || echo 0`);
+                if (parseInt(gc.trim()) > 0) { busy = true; break; }
+              }
+            } catch { /* ignore */ }
+          }
+          const displayName = (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
+            ? paneTitle.trim()
+            : name;
           sessions.push({
-            id: name,
-            name,
+            id,
+            name: displayName,
             path: path ?? os.homedir(),
             username: os.userInfo().username,
             last_activity: parseInt(activityStr ?? '0', 10),
-            busy: !isShell(cmd ?? 'bash'),
+            busy,
           });
         } catch {
           sessions.push({
-            id: name,
+            id,
             name,
             path: os.homedir(),
             username: os.userInfo().username,
@@ -147,19 +187,26 @@ export class TmuxBridge {
     }
   }
 
+  getScrollbackPath(sessionId: string): string {
+    return join(SCROLLBACK_DIR, `${sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')}.log`);
+  }
+
   async snapshot(sessionId: string): Promise<string> {
+    // tmux capture-pane produces color-coded text lines (with newlines) that create
+    // natural xterm scrollback. The raw log file is cursor-positioned TUI output and
+    // cannot create scrollback — it's kept only for the HistoryDialog REST endpoint.
     try {
       const { stdout } = await execAsync(
-        `tmux capture-pane -ep -t ${JSON.stringify(sessionId)} 2>/dev/null`
+        `tmux capture-pane -ep -S -2000 -t ${sh(sessionId)} 2>/dev/null`
       );
-      // Strip trailing blank lines so xterm doesn't scroll past the prompt
       const lines = stdout.split('\n');
       let last = lines.length - 1;
       while (last > 0 && lines[last].trim() === '') last--;
-      return lines.slice(0, last + 1).join('\n') + '\n';
-    } catch {
-      return '';
-    }
+      // Strip trailing spaces (prevent wrapping in narrower terminals) and use
+      // \r\n so xterm resets to col 0 on each line (bare \n only moves down).
+      if (last >= 0) return lines.slice(0, last + 1).map(l => l.trimEnd()).join('\r\n') + '\r\n';
+    } catch { /* fall through */ }
+    return '';
   }
 
   private getOrCreatePty(sessionId: string): ManagedSession {
@@ -179,12 +226,18 @@ export class TmuxBridge {
     const ms: ManagedSession = { pty: ptyProcess, cols, rows, lastPreview: '' };
     this.managed.set(sessionId, ms);
 
+    const scrollbackPath = join(SCROLLBACK_DIR, `${sessionId}.log`);
+    const stream = createWriteStream(scrollbackPath, { flags: 'a' });
+    this.scrollbackStreams.set(sessionId, stream);
+
     ptyProcess.onData((data) => {
       this.pubsub.publish(sessionId, { type: 'output', data });
+      stream.write(data);
     });
 
     ptyProcess.onExit(() => {
       this.managed.delete(sessionId);
+      this._closeScrollback(sessionId, false);
       logger.debug(`PTY exited for session: ${sessionId}`);
     });
 
@@ -212,32 +265,50 @@ export class TmuxBridge {
       } catch { /* ignore */ }
     }
     // Also tell tmux to resize
-    execAsync(`tmux resize-window -t ${JSON.stringify(sessionId)} -x ${cols} -y ${rows}`).catch(() => {});
+    execAsync(`tmux resize-window -t ${sh(sessionId)} -x ${cols} -y ${rows}`).catch(() => {});
   }
 
   async createSession(path?: string): Promise<string> {
-    const name = `vs-${Date.now()}`;
+    const baseName = path
+      ? path.split('/').filter(Boolean).pop() ?? 'shell'
+      : 'shell';
+
+    // Pick a unique tmux session name
+    let name = baseName;
+    try {
+      const { stdout: existing } = await execAsync('tmux list-sessions -F "#{session_name}" 2>/dev/null');
+      const taken = new Set(existing.trim().split('\n').filter(Boolean));
+      let i = 2;
+      while (taken.has(name)) name = `${baseName}-${i++}`;
+    } catch { /* no sessions yet — any name is fine */ }
+
     const dirArg = path ? `-c ${JSON.stringify(path)}` : `-c ${JSON.stringify(os.homedir())}`;
     await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg}`);
     // Give tmux a moment to start
     await new Promise(r => setTimeout(r, 200));
-    return name;
+    // Return the stable $N session ID, not the name
+    const { stdout } = await execAsync(`tmux display-message -t ${JSON.stringify(name)} -p "#{session_id}" 2>/dev/null`);
+    return stdout.trim() || name;
+  }
+
+  async renameSession(sessionId: string, newName: string): Promise<void> {
+    await execAsync(`tmux rename-session -t ${sh(sessionId)} ${JSON.stringify(newName)}`);
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    // Kill PTY if managed
     const ms = this.managed.get(sessionId);
     if (ms) {
       try { ms.pty.kill(); } catch { /* ignore */ }
       this.managed.delete(sessionId);
     }
-    await execAsync(`tmux kill-session -t ${JSON.stringify(sessionId)} 2>/dev/null`);
+    this._closeScrollback(sessionId, true);
+    await execAsync(`tmux kill-session -t ${sh(sessionId)} 2>/dev/null`);
   }
 
   async getSessionPid(sessionId: string): Promise<number | null> {
     try {
       const { stdout } = await execAsync(
-        `tmux display-message -t ${JSON.stringify(sessionId)} -p "#{pane_pid}" 2>/dev/null`
+        `tmux display-message -t ${sh(sessionId)} -p "#{pane_pid}" 2>/dev/null`
       );
       const pid = parseInt(stdout.trim(), 10);
       return isNaN(pid) ? null : pid;
@@ -246,12 +317,23 @@ export class TmuxBridge {
     }
   }
 
+  private _closeScrollback(sessionId: string, deleteFile: boolean): void {
+    const stream = this.scrollbackStreams.get(sessionId);
+    if (stream) {
+      try { stream.end(); } catch { /* ignore */ }
+      this.scrollbackStreams.delete(sessionId);
+    }
+    if (deleteFile) {
+      try { unlinkSync(join(SCROLLBACK_DIR, `${sessionId}.log`)); } catch { /* ignore */ }
+    }
+  }
+
   private async publishPreviews(): Promise<void> {
     const sessions = await this.listSessions();
     for (const session of sessions) {
       try {
         const { stdout } = await execAsync(
-          `tmux capture-pane -p -t ${JSON.stringify(session.id)} 2>/dev/null`
+          `tmux capture-pane -p -t ${sh(session.id)} 2>/dev/null`
         );
         const lines = stdout.split('\n').filter(l => l.trim());
         const preview = lines.slice(-2).join('\n');

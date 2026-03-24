@@ -105,51 +105,85 @@
 .status-dot.connected    { background: var(--success); }
 .status-dot.disconnected { background: var(--destructive); }
 .status-dot.connecting   { background: var(--warning); }
-.status-text { font-size: 11px; color: var(--muted-foreground); }
+.status-text { font-size: 11px; color: var(--muted-foreground); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Desktop session list ───────────────────────────────────────────────────── */
 
 .empty-state { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
 
+.session-repo-group {
+  border-left: 2px solid var(--repo-color, var(--border));
+  margin-left: 6px;
+}
+.session-repo-group .session-group-header { padding-left: 10px; }
+.session-repo-group .session-item { padding-left: 12px; }
+
+/* Prevent the Radix scroll viewport from computing width from content,
+   which would break text-overflow: ellipsis and push flex items off screen */
+.session-list [data-radix-scroll-area-viewport] { overflow-x: hidden !important; }
+
 .session-group-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 12px 3px 16px;
-  font-size: 10px; font-weight: 600; color: var(--primary);
-  text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8;
+  padding: 4px 6px 2px 12px;
+  gap: 4px; overflow: hidden;
 }
 .session-group-header:not(:first-child) { margin-top: 6px; }
 .session-group-label {
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 10px; font-weight: 500; color: var(--muted-foreground);
+  font-family: "Cascadia Code","JetBrains Mono",ui-monospace,monospace;
+  letter-spacing: 0;
 }
 
 .session-item {
   position: relative;
-  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  display: flex; align-items: center; gap: 5px; padding: 5px 6px 5px 10px;
   cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s;
+  overflow: hidden;
 }
 .session-item:hover  { background: var(--accent); }
 .session-item.active { background: var(--session-active-bg); border-left-color: var(--ring); }
-.session-info        { min-width: 0; flex: 1; overflow: hidden; }
 
 @keyframes pulse-busy {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.5; }
+  50%       { opacity: 0.4; }
 }
-.session-name {
-  font-size: 13px; color: var(--foreground); font-weight: 500;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+
+.session-state-dot {
+  width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
+  background: var(--muted-foreground); opacity: 0.35; transition: background 0.3s, opacity 0.3s;
 }
-.session-item.busy .session-name {
-  color: var(--warning);
+.session-state-dot.busy {
+  background: var(--warning); opacity: 1;
   animation: pulse-busy 1.2s ease-in-out infinite;
 }
-.session-preview {
-  font-family: monospace; font-size: 10px; color: var(--muted-foreground); margin-top: 3px;
-  white-space: pre; overflow: hidden; text-overflow: ellipsis;
-  height: 28px; opacity: 0.75; line-height: 1.4;
+
+.session-name-inline {
+  font-size: 12px; color: var(--foreground);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.session-item.active .session-name-inline { color: var(--foreground); }
+
+.session-pane-badge {
+  font-size: 9px; font-weight: 700; font-family: monospace;
+  color: var(--primary); background: color-mix(in srgb, var(--primary) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  border-radius: 3px; padding: 0 3px; line-height: 14px;
+  flex-shrink: 0; letter-spacing: 0;
+}
+
+.session-add-pane-btn {
+  background: none; border: none; cursor: pointer; padding: 1px 2px;
+  color: var(--muted-foreground); flex-shrink: 0; display: flex; align-items: center;
+  opacity: 0; transition: opacity 0.1s;
+}
+.session-item:hover .session-add-pane-btn { opacity: 1; }
+.session-item.active .session-add-pane-btn { opacity: 0.6; }
+.session-item.active .session-add-pane-btn:hover { opacity: 1; }
+
 .session-time {
-  font-size: 10px; color: var(--muted-foreground); margin-top: 2px; opacity: 0.5;
+  font-size: 10px; color: var(--muted-foreground); opacity: 0.4; flex-shrink: 0;
 }
 .session-path {
   font-size: 10px; color: var(--muted-foreground); margin-top: 1px;
@@ -161,9 +195,20 @@
 #sheet-session-list .session-close { opacity: 1; }
 
 /* ── Terminal ───────────────────────────────────────────────────────────────── */
-#terminal { position: absolute; inset: 0; padding: 8px; overflow: hidden; }
-#terminal .xterm-viewport { overflow-y: scroll !important; overscroll-behavior: none; touch-action: pan-y; }
-#terminal .xterm-screen  { touch-action: pan-y; }
+.terminal-pane { position: absolute; inset: 0; padding: 8px; overflow: hidden; }
+.terminal-pane .xterm-viewport { overflow-y: scroll !important; overscroll-behavior: contain; touch-action: pan-y; }
+/* touch-action: none lets JS handlers (and xterm's own) fully control touch on the canvas overlay.
+   pan-y here would be ignored anyway: xterm-screen is a *sibling* of xterm-viewport so the browser
+   can't reach the viewport as a scroll ancestor, and it fights xterm's preventDefault() calls. */
+.terminal-pane .xterm-screen  { touch-action: none; }
+
+/* ── Split pane header ──────────────────────────────────────────────────────── */
+.pane-header-btn {
+  background: none; border: none; cursor: pointer; padding: 0 4px;
+  font-size: 11px; color: var(--foreground); display: flex; align-items: center; gap: 3px;
+  flex: 1; min-width: 0; overflow: hidden;
+}
+.pane-header-btn:hover { color: var(--primary); }
 
 
 /* ── Placeholder ────────────────────────────────────────────────────────────── */
@@ -196,3 +241,38 @@
 .log-entry.WARNING { color: var(--warning); }
 .log-entry.INFO    { color: var(--muted-foreground); }
 .log-entry.DEBUG   { color: var(--muted); }
+
+/* ── Markdown preview ─────────────────────────────────────────────────────────── */
+.md-preview { color: #c9d1d9; font-size: 14px; line-height: 1.7; max-width: 800px; }
+.md-preview h1, .md-preview h2, .md-preview h3,
+.md-preview h4, .md-preview h5, .md-preview h6 {
+  color: #e6edf3; font-weight: 600; margin: 1.2em 0 0.5em;
+  padding-bottom: 0.2em;
+}
+.md-preview h1 { font-size: 1.8em; border-bottom: 1px solid #30363d; }
+.md-preview h2 { font-size: 1.4em; border-bottom: 1px solid #30363d; }
+.md-preview h3 { font-size: 1.15em; }
+.md-preview p  { margin: 0.6em 0; }
+.md-preview a  { color: #58a6ff; text-decoration: none; }
+.md-preview a:hover { text-decoration: underline; }
+.md-preview code {
+  background: #161b22; color: #ff7b72; border-radius: 4px;
+  padding: 0.15em 0.4em; font-family: "Cascadia Code","JetBrains Mono",monospace; font-size: 0.88em;
+}
+.md-preview pre {
+  background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+  padding: 14px 16px; overflow-x: auto; margin: 0.8em 0;
+}
+.md-preview pre code { background: none; color: #c9d1d9; padding: 0; font-size: 0.9em; }
+.md-preview blockquote {
+  border-left: 3px solid #30363d; margin: 0.8em 0; padding: 0.2em 1em;
+  color: #8b949e;
+}
+.md-preview ul, .md-preview ol { padding-left: 1.6em; margin: 0.5em 0; }
+.md-preview li { margin: 0.2em 0; }
+.md-preview table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
+.md-preview th, .md-preview td { border: 1px solid #30363d; padding: 6px 12px; }
+.md-preview th { background: #161b22; color: #e6edf3; font-weight: 600; }
+.md-preview tr:nth-child(even) { background: #0d1117; }
+.md-preview hr { border: none; border-top: 1px solid #30363d; margin: 1.2em 0; }
+.md-preview img { max-width: 100%; border-radius: 6px; }

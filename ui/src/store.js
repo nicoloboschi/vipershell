@@ -14,6 +14,8 @@ const useStore = create((set, get) => ({
   sessionLastEvent: {},
   sessionOrder: [],
   sessionMap: {},
+  sessionUrls: {},   // sessionId → string[] (deduplicated, capped at 50)
+  openPaneMap: {},   // sessionId → number[] (pane indices where it's open)
   wsStatus: 'connecting',
   sheetOpen: false,
   confirm: null,
@@ -44,9 +46,14 @@ const useStore = create((set, get) => ({
 
     const sessionMap = Object.fromEntries(sessions.map(s => [s.id, s]));
 
-    // Group by path to build ordered list
+    // Sort by tmux session ID ($0, $1, …) — creation order
+    const sorted = [...sessions].sort((a, b) =>
+      (parseInt(a.id.replace('$', ''), 10) || 0) - (parseInt(b.id.replace('$', ''), 10) || 0)
+    );
+
+    // Group by path to build ordered list (group order = first session created in each path)
     const byPath = {};
-    for (const s of sessions) {
+    for (const s of sorted) {
       const key = s.path ?? '';
       if (!byPath[key]) byPath[key] = [];
       byPath[key].push(s);
@@ -60,7 +67,7 @@ const useStore = create((set, get) => ({
     // Update last-activity timestamps from server-provided values.
     // Only advance the timestamp — never go backwards (avoids flicker on re-broadcast).
     const nextLastEvent = { ...get().sessionLastEvent };
-    for (const s of sessions) {
+    for (const s of sorted) {
       if (s.last_activity) {
         const ms = Math.round(s.last_activity * 1000);
         if (!nextLastEvent[s.id] || ms > nextLastEvent[s.id]) {
@@ -70,7 +77,7 @@ const useStore = create((set, get) => ({
     }
 
     set({
-      sessions,
+      sessions: sorted,
       sessionMap,
       sessionOrder,
       currentSessionId: nextCurrentId,
@@ -81,6 +88,16 @@ const useStore = create((set, get) => ({
   setCurrentSessionId(id) {
     if (id) localStorage.setItem('vipershell-last-session', id);
     set({ currentSessionId: id });
+  },
+
+  setOpenPaneMap(panes) {
+    const map = {};
+    panes.forEach((sid, idx) => {
+      if (!sid) return;
+      if (!map[sid]) map[sid] = [];
+      map[sid].push(idx);
+    });
+    set({ openPaneMap: map });
   },
 
   /**
@@ -138,19 +155,34 @@ const useStore = create((set, get) => ({
     }
   },
 
+  addSessionUrl(sessionId, url) {
+    const prev = get().sessionUrls[sessionId] ?? [];
+    if (prev.length >= 50) return;
+    // Case-insensitive dedup on the full URL string
+    const lower = url.toLowerCase();
+    if (prev.some(u => u.toLowerCase() === lower)) return;
+    set({ sessionUrls: { ...get().sessionUrls, [sessionId]: [...prev, url] } });
+  },
+
+  clearSessionUrls(sessionId) {
+    const urls = { ...get().sessionUrls };
+    delete urls[sessionId];
+    set({ sessionUrls: urls });
+  },
+
   /**
    * Navigate to the previous or next session in order.
    * @param {'up'|'down'} direction
    * @returns {string|null} next session id, or null if navigation is not possible
    */
   navigateSession(direction) {
-    const { sessionOrder, currentSessionId } = get();
-    if (sessionOrder.length < 2) return null;
-    const idx = sessionOrder.indexOf(currentSessionId);
+    const { currentSessionId } = get();
+    const items = Array.from(document.querySelectorAll('[data-session-id]'));
+    if (items.length < 2) return null;
+    const idx = items.findIndex(el => el.dataset.sessionId === currentSessionId);
     if (idx === -1) return null;
-    const next = direction === 'up' ? idx - 1 : idx + 1;
-    if (next < 0 || next >= sessionOrder.length) return null;
-    return sessionOrder[next];
+    const next = (direction === 'up' ? idx - 1 + items.length : idx + 1) % items.length;
+    return items[next].dataset.sessionId;
   },
 
 

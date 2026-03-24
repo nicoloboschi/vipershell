@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Settings, ScrollText, Palette, SquarePlus, Home, Zap, TerminalSquare, BrainCircuit } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home } from 'lucide-react';
 import { tildefy } from '../utils.js';
 import useStore from '../store.js';
 import SessionList from './SessionList.jsx';
 import LogsModal from './LogsModal.jsx';
 import ThemeDialog from './ThemeDialog.jsx';
-import MemoryDialog from './MemoryDialog.jsx';
 import CommandsDialog, { loadCommands } from './CommandsDialog.jsx';
+import MemoryDialog from './MemoryDialog.jsx';
+import ShortcutsDialog from './ShortcutsDialog.jsx';
 import { Button } from './ui/button.jsx';
 import {
   DropdownMenu,
@@ -17,34 +18,45 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu.jsx';
 
-export default function Sidebar({ onConnect, send }) {
+export default function Sidebar({ onConnect, send, paneCount = 1, onPaneCountChange, onAddToPane }) {
   const wsStatus = useStore(s => s.wsStatus);
   const currentSessionId = useStore(s => s.currentSessionId);
-  const sessionMap = useStore(s => s.sessionMap);
   const sessions = useStore(s => s.sessions);
   const [showLogs, setShowLogs] = useState(false);
   const [showThemes, setShowThemes] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [commands, setCommands] = useState(loadCommands);
   const [version, setVersion] = useState(null);
-  const [hindsightUp, setHindsightUp] = useState(null); // null=unknown, true, false
+  const [hindsightUp, setHindsightUp] = useState(null);
+  const [sidebarW, setSidebarW] = useState(() => {
+    try { return parseInt(localStorage.getItem('vipershell:sidebar-w')) || 256; } catch { return 256; }
+  });
+  const draggingRef = useRef(false);
 
-  const statusLabel = {
-    connecting: 'Connecting…',
-    connected: 'Connected',
-    disconnected: 'Disconnected',
-  }[wsStatus] ?? 'Unknown';
+  const onDragStart = useCallback((e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    const startX = e.clientX;
+    const startW = sidebarW;
+    const handle = e.currentTarget;
+    handle.style.background = '#58a6ff';
+    const onMove = (ev) => {
+      if (!draggingRef.current) return;
+      setSidebarW(Math.max(180, Math.min(500, startW + ev.clientX - startX)));
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      handle.style.background = 'transparent';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setSidebarW(w => { try { localStorage.setItem('vipershell:sidebar-w', String(w)); } catch {} return w; });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [sidebarW]);
 
-  // Fetch version once
-  useEffect(() => {
-    fetch('/api/version')
-      .then(r => r.json())
-      .then(d => setVersion(d.version))
-      .catch(() => setVersion('?'));
-  }, []);
-
-  // Poll Hindsight health every 10s
   useEffect(() => {
     let cancelled = false;
     async function check() {
@@ -60,11 +72,35 @@ export default function Sidebar({ onConnect, send }) {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  const statusLabel = {
+    connecting: 'Connecting…',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+  }[wsStatus] ?? 'Unknown';
+
+  // Fetch version once
+  useEffect(() => {
+    fetch('/api/version')
+      .then(r => r.json())
+      .then(d => setVersion(d.version))
+      .catch(() => setVersion('?'));
+  }, []);
+
   return (
     <aside
-      className="hidden md:flex flex-col w-64 shrink-0 border-r"
-      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+      className="hidden md:flex flex-col shrink-0"
+      style={{ width: sidebarW, background: 'var(--card)', borderRight: '1px solid var(--border)', position: 'relative' }}
     >
+      {/* Resize handle */}
+      <div
+        onMouseDown={onDragStart}
+        style={{
+          position: 'absolute', top: 0, right: 0, width: 4, height: '100%',
+          cursor: 'col-resize', zIndex: 20, background: 'transparent',
+        }}
+        onMouseEnter={e => { if (!draggingRef.current) e.currentTarget.style.background = '#58a6ff'; }}
+        onMouseLeave={e => { if (!draggingRef.current) e.currentTarget.style.background = 'transparent'; }}
+      />
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3.5 border-b"
@@ -78,6 +114,7 @@ export default function Sidebar({ onConnect, send }) {
         id="session-list"
         onConnect={onConnect}
         send={send}
+        onAddToPane={onAddToPane}
       />
 
       {/* Status bar */}
@@ -93,15 +130,9 @@ export default function Sidebar({ onConnect, send }) {
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${hindsightUp ? 'bg-green-500' : 'bg-red-500'}`}
           />
         )}
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="New session"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            >
+            <Button variant="ghost" size="icon" title="New session" className="h-7 w-7 text-muted-foreground hover:text-foreground">
               <SquarePlus size={14} />
             </Button>
           </DropdownMenuTrigger>
@@ -188,6 +219,10 @@ export default function Sidebar({ onConnect, send }) {
               <BrainCircuit size={14} />
               Memory
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowShortcuts(true)}>
+              <Keyboard size={14} />
+              Keyboard Shortcuts
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -196,6 +231,7 @@ export default function Sidebar({ onConnect, send }) {
       {showThemes && <ThemeDialog onClose={() => setShowThemes(false)} />}
       {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}
       {showCommands && <CommandsDialog onClose={() => { setShowCommands(false); setCommands(loadCommands()); }} />}
+      {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
     </aside>
   );
 }

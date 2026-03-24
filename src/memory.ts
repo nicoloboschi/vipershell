@@ -9,8 +9,9 @@ import { logger } from './server.js';
 const execAsync = promisify(exec);
 
 const BANK_ID = 'vipershell';
-const DAEMON_URL = 'http://127.0.0.1:8888';
-const HEALTH_TIMEOUT_MS = 30_000;
+const PROFILE = 'vipershell';
+const DAEMON_URL = 'http://127.0.0.1:9027';
+const HEALTH_TIMEOUT_MS = 90_000;
 const HEALTH_POLL_MS = 500;
 const KEEPALIVE_INTERVAL_MS = 15_000;
 const CONFIG_PATH = join(homedir(), '.config', 'vipershell', 'config.json');
@@ -100,7 +101,7 @@ export class MemoryStore {
     }
 
     if (!(await this._isHealthy())) {
-      await this._startDaemon(cfg);
+      this._startDaemon(cfg);
       if (!(await this._waitForHealth())) {
         logger.warn('Hindsight daemon did not become ready — memory disabled');
         return;
@@ -142,33 +143,21 @@ export class MemoryStore {
 
   // ── Daemon management ───────────────────────────────────────────────────────
 
-  private async _startDaemon(cfg: MemoryConfig): Promise<void> {
+  private _startDaemon(_cfg: MemoryConfig): void {
     logger.info('Starting Hindsight daemon via uvx hindsight-embed…');
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: '0',   // keep running indefinitely
-      HINDSIGHT_EMBED_LLM_PROVIDER: cfg.llmProvider,
-    };
-    if (cfg.llmApiKey) env.HINDSIGHT_EMBED_LLM_API_KEY = cfg.llmApiKey;
-    if (cfg.llmModel) env.HINDSIGHT_EMBED_LLM_MODEL = cfg.llmModel;
-
-    try {
-      // Running a retain command triggers daemon auto-start inside hindsight-embed
-      const proc = spawn('uvx', ['hindsight-embed@latest', 'memory', 'retain', BANK_ID, ' ', '--async'], {
-        env,
-        detached: true,
-        stdio: 'ignore',
-      });
-      proc.unref();
-      proc.on('error', (e) => logger.warn(`uvx spawn error: ${e.message}`));
-    } catch (e) {
-      logger.warn(`Failed to spawn uvx: ${e}`);
-    }
+    const child = spawn('uvx', ['hindsight-embed@latest', '-p', PROFILE, 'daemon', 'start'], {
+      stdio: 'ignore',
+      detached: false,
+    });
+    child.on('error', (e) => logger.warn(`Failed to launch hindsight-embed: ${e.message}`));
+    child.on('exit', (code) => {
+      if (code !== 0 && code !== null) logger.warn(`hindsight-embed daemon start exited with code ${code}`);
+    });
   }
 
   private async _stopDaemon(): Promise<void> {
     try {
-      await execAsync('uvx hindsight-embed@latest daemon stop', { timeout: 10_000 });
+      await execAsync(`uvx hindsight-embed@latest -p ${PROFILE} daemon stop`, { timeout: 10_000 });
       logger.info('Hindsight daemon stopped');
     } catch { /* not running or uvx unavailable */ }
   }
@@ -196,8 +185,8 @@ export class MemoryStore {
       if (!this.client) return;
       if (!(await this._isHealthy())) {
         logger.warn('Hindsight daemon unreachable — restarting…');
-        await this._startDaemon(cfg);
-        if (!(await this._waitForHealth(10_000))) {
+        this._startDaemon(cfg);
+        if (!(await this._waitForHealth(60_000))) {
           logger.error('Hindsight daemon could not be restarted — disabling memory');
           this.client = null;
           this._startedAt = null;

@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { SquareTerminal, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { SquareTerminal } from 'lucide-react';
 import useStore from '../store.js';
 import { notify } from '../utils.js';
-import { Button } from './ui/button.jsx';
-import StatChips from './StatChips.jsx';
 
 /**
  * @param {{
@@ -12,18 +10,10 @@ import StatChips from './StatChips.jsx';
  *   sendRef: React.MutableRefObject<(msg: object) => void>,
  * }} props
  */
-export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
-  const currentSessionId = useStore(s => s.currentSessionId);
-  const sessionMap       = useStore(s => s.sessionMap);
-  const showConfirm      = useStore(s => s.showConfirm);
+export default function TerminalPane({ termRef, fitAddonRef, sendRef, sessionId: sessionIdProp }) {
+  const storeSessionId   = useStore(s => s.currentSessionId);
+  const currentSessionId = sessionIdProp ?? storeSessionId;
   const termContainerRef = useRef(null);
-
-  const handleCloseSession = useCallback(async () => {
-    const sid  = useStore.getState().currentSessionId;
-    const name = useStore.getState().sessionMap[sid]?.name ?? 'session';
-    const confirmed = await showConfirm(`Close session "${name}"?`);
-    if (confirmed) sendRef.current({ type: 'close_session', session_id: sid });
-  }, [showConfirm, sendRef]);
 
   // Mount terminal into DOM once
   useEffect(() => {
@@ -40,7 +30,11 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
     if (!term) return;
 
     const dataDispose = term.onData((data) => {
-      const sid = useStore.getState().currentSessionId;
+      // Filter DA responses (e.g. \x1b[?1;2c, \x1b[>0;276;0c) that xterm auto-generates
+      // when tmux sends DA1/DA2 requests on connect — forwarding them to the PTY causes
+      // visible garbage text like "1;2c0;276;0c" to appear in the shell.
+      if (/^\x1b\[[\?>][\d;]*c$/.test(data)) return;
+      const sid = sessionIdProp ?? useStore.getState().currentSessionId;
       if (sid) sendRef.current({ type: 'input', data });
     });
     const bellDispose = term.onBell(() => {
@@ -51,36 +45,106 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
     return () => { dataDispose.dispose(); bellDispose.dispose(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mobile: keep keyboard open by re-focusing xterm's internal textarea on blur
+  // Touch scroll + keep-keyboard-open refocus.
+  //
+  // Touch is handled in JS because xterm-screen (canvas) is a *sibling* of
+  // xterm-viewport — native touch can't reach the viewport scroll container.
+  // We set scrollTop directly; xterm's 'scroll' event listener updates ydisp.
+  //
+  // Wheel: we intercept in capture phase on the primary buffer to prevent
+  // tmux's DECSET 1007 from converting wheel events to arrow sequences.
+  // On the alternate buffer we return early (though with alt-screen suppression
+  // this branch is rarely reached in normal tmux usage).
   useEffect(() => {
     const el = termContainerRef.current;
     if (!el) return;
 
-    // Wait for xterm to create its internal textarea
-    const observer = new MutationObserver(() => {
+    let lastScrollTime = 0;
+    let lastTouchY = 0, accPx = 0, isTouchScrolling = false;
+
+    const getVp = () => el.querySelector('.xterm-viewport');
+
+    const onTouchStart = (e) => {
+      if (e.touches[0].clientX > el.getBoundingClientRect().right - 28) return;
+      lastTouchY = e.touches[0].clientY;
+      accPx = 0;
+      isTouchScrolling = false;
+    };
+
+    const onTouchMove = (e) => {
+      const dy = lastTouchY - e.touches[0].clientY;
+      lastTouchY = e.touches[0].clientY;
+      accPx += dy;
+      const px = Math.trunc(accPx);
+      accPx -= px;
+      if (px !== 0) {
+        const vp = getVp();
+        if (vp) {
+          vp.scrollTop = Math.max(0, Math.min(vp.scrollTop + px, vp.scrollHeight - vp.clientHeight));
+          isTouchScrolling = true;
+          lastScrollTime = Date.now();
+        }
+      }
+      if (isTouchScrolling) { e.preventDefault(); e.stopPropagation(); }
+    };
+
+    const onTouchEnd = () => {
+      if (isTouchScrolling) lastScrollTime = Date.now();
+      isTouchScrolling = false;
+    };
+
+    const onWheel = (e) => {
+      if (termRef.current?.buffer?.active?.type === 'alternate') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const vp = getVp();
+      if (!vp) return;
+      const deltaPx = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? e.deltaY * ((termRef.current?.options?.fontSize ?? 14) * (termRef.current?.options?.lineHeight ?? 1.2))
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? e.deltaY * (termRef.current?.rows ?? 20) * ((termRef.current?.options?.fontSize ?? 14) * (termRef.current?.options?.lineHeight ?? 1.2))
+          : e.deltaY; // DOM_DELTA_PIXEL — pass through directly
+      vp.scrollTop = Math.max(0, Math.min(vp.scrollTop + deltaPx, vp.scrollHeight - vp.clientHeight));
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true,  capture: true });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false, capture: true });
+    el.addEventListener('touchend',   onTouchEnd,   { passive: true,  capture: true });
+    el.addEventListener('wheel',      onWheel,      { passive: false, capture: true });
+
+    // Refocus textarea to keep soft keyboard open after blur, but not during scroll
+    // or when a Radix overlay (dropdown/dialog) is open.
+    const initRefocus = () => {
       const textarea = el.querySelector('textarea');
-      if (!textarea) return;
-      observer.disconnect();
-
-      const refocus = () => {
-        setTimeout(() => {
-          const active = document.activeElement;
-          // Don't steal focus if a real UI element (button, input, etc.) is active
-          if (active && active !== document.body && active !== textarea &&
-              (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'BUTTON' || active.tagName === 'A')) return;
-          textarea.focus({ preventScroll: true });
-        }, 150);
-      };
-
+      if (!textarea || el._refocusAttached) return;
+      el._refocusAttached = true;
+      const refocus = () => setTimeout(() => {
+        if (Date.now() - lastScrollTime < 800) return;
+        if (document.querySelector('[data-radix-popper-content-wrapper],[data-radix-dialog-content]')) return;
+        const a = document.activeElement;
+        if (a && a !== document.body && a !== textarea &&
+            (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' ||
+             a.tagName === 'BUTTON' || a.tagName === 'A')) return;
+        textarea.focus({ preventScroll: true });
+      }, 150);
       textarea.addEventListener('blur', refocus);
-      // Cleanup stored so the outer cleanup can reach it
-      el._mobileKbCleanup = () => textarea.removeEventListener('blur', refocus);
-    });
+      el._refocusCleanup = () => {
+        textarea.removeEventListener('blur', refocus);
+        el._refocusAttached = false;
+      };
+    };
 
-    observer.observe(el, { childList: true, subtree: true });
+    initRefocus();
+    const mo = new MutationObserver(initRefocus);
+    mo.observe(el, { childList: true, subtree: true });
+
     return () => {
-      observer.disconnect();
-      el._mobileKbCleanup?.();
+      mo.disconnect();
+      el.removeEventListener('touchstart', onTouchStart, { capture: true });
+      el.removeEventListener('touchmove',  onTouchMove,  { capture: true });
+      el.removeEventListener('touchend',   onTouchEnd,   { capture: true });
+      el.removeEventListener('wheel',      onWheel,      { capture: true });
+      el._refocusCleanup?.();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -92,7 +156,7 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
       timer = setTimeout(() => {
         fitAddonRef.current?.fit();
         const term = termRef.current;
-        const sid  = useStore.getState().currentSessionId;
+        const sid  = sessionIdProp ?? useStore.getState().currentSessionId;
         if (term && sid) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
       }, 80);
     };
@@ -100,32 +164,8 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
     return () => { window.removeEventListener('resize', handleResize); clearTimeout(timer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const session = sessionMap[currentSessionId];
-
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      {currentSessionId && (
-        <div
-          className="flex items-center gap-1 px-4 py-2.5 border-b shrink-0"
-          style={{ borderColor: 'var(--border)' }}
-        >
-          <span className="status-text hidden md:inline" style={{ marginRight: 8 }}>{session?.name ?? ''}</span>
-
-          <StatChips />
-
-          <div className="flex-1" />
-
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Close session"
-            onClick={handleCloseSession}
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      )}
 
       <main
         className="flex-1 relative overflow-hidden min-h-0"
@@ -141,7 +181,7 @@ export default function TerminalPane({ termRef, fitAddonRef, sendRef }) {
             </div>
           </div>
         )}
-        <div id="terminal" ref={termContainerRef} />
+        <div className="terminal-pane" ref={termContainerRef} />
         <TerminalScrollbar termContainerRef={termContainerRef} />
       </main>
     </div>
@@ -166,7 +206,7 @@ function TerminalScrollbar({ termContainerRef }) {
     const trackH = trackRef.current.clientHeight;
     const thumbH = Math.max(44, trackH * ratio);
     const maxTop = trackH - thumbH;
-    const top = ratio >= 1 ? 0 : maxTop - (scrollTop / (scrollHeight - clientHeight)) * maxTop;
+    const top = ratio >= 1 ? 0 : (scrollTop / (scrollHeight - clientHeight)) * maxTop;
     thumbRef.current.style.height = `${thumbH}px`;
     thumbRef.current.style.transform = `translateY(${top}px)`;
   }
@@ -223,7 +263,7 @@ function TerminalScrollbar({ termContainerRef }) {
     // Jump scroll to clicked position immediately
     const jumpTo = (clientY) => {
       const relY = clientY - trackRect.top - thumbH / 2;
-      viewport.scrollTop = maxScroll - (Math.max(0, Math.min(relY, maxTravel)) / maxTravel) * maxScroll;
+      viewport.scrollTop = (Math.max(0, Math.min(relY, maxTravel)) / maxTravel) * maxScroll;
     };
     jumpTo(e.clientY);
 

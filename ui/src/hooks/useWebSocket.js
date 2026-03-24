@@ -29,6 +29,15 @@ export function useWebSocket({ onMessage, onOpen }) {
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
 
+    // Don't open a new socket while the previous one is still closing
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CLOSING) {
+      wsRef.current.onclose = () => {
+        wsRef.current = null;
+        connect();
+      };
+      return;
+    }
+
     useStore.getState().setWsStatus('connecting');
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

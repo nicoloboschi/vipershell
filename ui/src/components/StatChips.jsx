@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { GitBranch, GitCommitHorizontal, ArrowUp, ArrowDown, Github, GitFork } from 'lucide-react';
 import { useStats } from '../hooks/useStats.js';
+import { useGit, useGithubPR, useWorktrees } from '../hooks/useGit.js';
 import useStore from '../store.js';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover.jsx';
 
@@ -204,6 +206,275 @@ function ProcessList({ processes, sessionId }) {
   );
 }
 
+// ── URL list popover ──────────────────────────────────────────────────────────
+
+const GH_PR_RE     = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
+const GH_ISSUE_RE  = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/;
+const GH_COMMIT_RE = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{7})[0-9a-f]*/;
+
+function parseUrl(url) {
+  let m;
+  if ((m = url.match(GH_PR_RE)))     return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'PR' };
+  if ((m = url.match(GH_ISSUE_RE)))  return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'Issue' };
+  if ((m = url.match(GH_COMMIT_RE))) return { favicon: 'https://github.com/favicon.ico', badge: m[3],           label: `${m[1]}/${m[2]}`, sublabel: 'Commit' };
+  try {
+    const u = new URL(url);
+    const path = u.pathname.replace(/\/$/, '');
+    return {
+      favicon: `${u.origin}/favicon.ico`,
+      badge: null,
+      label: u.hostname + (path.length > 28 ? path.slice(0, 26) + '…' : path),
+      sublabel: null,
+    };
+  } catch {
+    return { favicon: null, badge: null, label: url.length > 40 ? url.slice(0, 38) + '…' : url, sublabel: null };
+  }
+}
+
+function UrlList({ urls }) {
+  if (!urls || urls.length === 0) {
+    return (
+      <div style={{ padding: '20px 16px', textAlign: 'center', fontSize: 12, color: 'var(--muted-foreground)', opacity: 0.6 }}>
+        No URLs detected
+      </div>
+    );
+  }
+
+  // Show newest first
+  const reversed = [...urls].reverse();
+
+  return (
+    <div style={{ minWidth: 280, maxWidth: 380 }}>
+      <div style={{
+        padding: '7px 14px 6px',
+        fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
+        color: 'var(--muted-foreground)', opacity: 0.6,
+        borderBottom: '1px solid var(--border)',
+      }}>
+        Links — {urls.length}
+      </div>
+      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {reversed.map((url, i) => {
+          const { favicon, badge, label, sublabel } = parseUrl(url);
+          return (
+            <a
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px',
+                background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.025)',
+                textDecoration: 'none',
+                lineHeight: 1.3,
+              }}
+            >
+              {favicon && (
+                <img
+                  src={favicon}
+                  width={14} height={14}
+                  style={{ borderRadius: 2, flexShrink: 0, opacity: 0.85 }}
+                  onError={e => { e.currentTarget.style.display = 'none'; }}
+                />
+              )}
+              {badge ? (
+                /* GitHub-style: big badge number + muted repo/type label */
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--primary)', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', flexShrink: 0 }}>
+                    {badge}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {label}
+                  </span>
+                  {sublabel && (
+                    <span style={{ fontSize: 9, color: 'var(--muted-foreground)', opacity: 0.5, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {sublabel}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+                  {label}
+                </span>
+              )}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── GitChip ───────────────────────────────────────────────────────────────────
+
+function GitDetails({ git, github, sessionId, send }) {
+  const Icon = git.detached ? GitCommitHorizontal : GitBranch;
+  const branchColor = git.dirty ? '#d29922' : '#3fb950';
+  const prNumber = github?.prUrl?.match(/\/pull\/(\d+)/)?.[1];
+  const [worktrees, refreshWorktrees] = useWorktrees(sessionId);
+  const [wtLoading, setWtLoading] = useState(false);
+  const [wtError, setWtError] = useState(null);
+
+  async function createWorktree() {
+    setWtLoading(true);
+    setWtError(null);
+    try {
+      const res = await fetch(`/api/git/${encodeURIComponent(sessionId)}/worktree`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { setWtError(data.error ?? 'Failed'); return; }
+      send({ type: 'create_session', path: data.path });
+      refreshWorktrees();
+    } catch (e) {
+      setWtError(String(e));
+    } finally {
+      setWtLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ minWidth: 240, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Icon size={13} style={{ color: branchColor, flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color: branchColor, fontWeight: 600 }}>
+          {git.branch}
+        </span>
+        {git.detached && (
+          <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.6 }}>detached</span>
+        )}
+        {github && (
+          <a
+            href={github.prUrl ?? github.repoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            title={prNumber ? `Open PR #${prNumber} on GitHub` : 'Open repository on GitHub'}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', color: 'var(--muted-foreground)', textDecoration: 'none', fontSize: 11, flexShrink: 0 }}
+            className="hover:text-foreground"
+          >
+            <Github size={12} />
+            {prNumber && <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>#{prNumber}</span>}
+          </a>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <Row label="Status" value={git.dirty ? 'Uncommitted changes' : 'Clean'} color={git.dirty ? '#d29922' : '#3fb950'} />
+        {git.ahead > 0  && <Row label="Ahead"  value={`${git.ahead} commit${git.ahead  > 1 ? 's' : ''}`} color="#58a6ff" />}
+        {git.behind > 0 && <Row label="Behind" value={`${git.behind} commit${git.behind > 1 ? 's' : ''}`} color="#ff7b72" />}
+        {git.ahead === 0 && git.behind === 0 && !git.detached && (
+          <Row label="Remote" value="Up to date" color="var(--muted-foreground)" />
+        )}
+      </div>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+          <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.65, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <GitFork size={9} /> Worktrees
+          </span>
+          <button
+            onClick={createWorktree}
+            disabled={wtLoading}
+            title="Create new worktree"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 18, height: 18, background: 'none', border: '1px solid var(--border)',
+              borderRadius: 3, cursor: wtLoading ? 'default' : 'pointer',
+              color: 'var(--muted-foreground)', opacity: wtLoading ? 0.5 : 1, flexShrink: 0,
+            }}
+            className="hover:bg-white/5 hover:text-foreground"
+          >
+            <span style={{ fontSize: 14, lineHeight: 1, marginTop: -1 }}>+</span>
+          </button>
+        </div>
+        {worktrees === null && (
+          <span style={{ fontSize: 10, color: 'var(--muted-foreground)', opacity: 0.5 }}>Loading…</span>
+        )}
+        {worktrees?.map(wt => (
+          <button
+            key={wt.path}
+            onClick={() => send({ type: 'create_session', path: wt.path })}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+              background: 'none', border: 'none', borderRadius: 3,
+              padding: '3px 4px', cursor: 'pointer', fontSize: 11, color: 'var(--muted-foreground)',
+            }}
+            className="hover:bg-white/5 hover:text-foreground"
+            title={wt.path}
+          >
+            <GitFork size={10} style={{ flexShrink: 0, opacity: 0.6 }} />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {wt.branch ?? wt.path.split('/').pop()}
+              </span>
+              <span style={{ fontSize: 9, opacity: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {wt.path}
+              </span>
+            </span>
+          </button>
+        ))}
+        {wtError && <span style={{ fontSize: 10, color: '#ff7b72' }}>{wtError}</span>}
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+      <span style={{ opacity: 0.6 }}>{label}</span>
+      <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color }}>{value}</span>
+    </div>
+  );
+}
+
+function GitChip({ sessionId, send }) {
+  const git    = useGit(sessionId);
+  const github = useGithubPR(sessionId);
+  if (!git) return null;
+
+  const branchColor = git.dirty ? '#d29922' : '#3fb950';
+  const prNumber = github?.prUrl?.match(/\/pull\/(\d+)/)?.[1];
+
+  return (
+    <>
+      {SEP}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+              borderRadius: 4,
+            }}
+            className="hover:bg-white/5"
+            title="Git info"
+          >
+            <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
+              GIT
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3, lineHeight: 1 }}>
+              <GitBranch size={9} style={{ color: branchColor, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: branchColor, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
+                {git.branch}
+              </span>
+              {git.dirty && <span style={{ fontSize: 8, color: '#d29922', fontWeight: 700 }}>●</span>}
+              {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#58a6ff' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
+              {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#ff7b72' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
+              {prNumber && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: '#79c0ff' }}>
+                  <Github size={8} strokeWidth={2} />#{prNumber}
+                </span>
+              )}
+            </span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="bottom" align="end">
+          <GitDetails git={git} github={github} sessionId={sessionId} send={send} />
+        </PopoverContent>
+      </Popover>
+    </>
+  );
+}
+
 // ── Separator ─────────────────────────────────────────────────────────────────
 
 const SEP = (
@@ -212,16 +483,18 @@ const SEP = (
 
 // ── StatChips ─────────────────────────────────────────────────────────────────
 
-export default function StatChips() {
-  const stats = useStats();
-  const currentSessionId = useStore(s => s.currentSessionId);
+const EMPTY_URLS = [];
+
+export default function StatChips({ sessionId, send }) {
+  const stats = useStats(sessionId);
+  const sessionUrls = useStore(s => s.sessionUrls?.[sessionId] ?? EMPTY_URLS);
   const [cpuH, setCpuH] = useState([]);
   const [memH, setMemH] = useState([]);
 
   useEffect(() => {
     setCpuH([]);
     setMemH([]);
-  }, [currentSessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!stats) return;
@@ -229,9 +502,7 @@ export default function StatChips() {
     setMemH(h => [...h.slice(-(HISTORY - 1)), stats.mem_percent]);
   }, [stats]);
 
-  if (cpuH.length === 0) return null;
-
-  const cpuVal = cpuH[cpuH.length - 1].toFixed(0);
+  const cpuVal = cpuH.length > 0 ? cpuH[cpuH.length - 1].toFixed(0) : null;
   const memGb = stats?.mem_used_gb ?? 0;
   const memVal = memGb < 10 ? memGb.toFixed(1) : Math.round(memGb).toString();
   const processes = stats?.processes ?? null;
@@ -239,9 +510,15 @@ export default function StatChips() {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
-      <StatWidget label="CPU" value={cpuVal} unit="%" history={cpuH} color="#58a6ff" />
-      {SEP}
-      <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
+      <GitChip sessionId={sessionId} send={send} />
+      {cpuVal !== null && (
+        <>
+          {SEP}
+          <StatWidget label="CPU" value={cpuVal} unit="%" history={cpuH} color="#58a6ff" />
+          {SEP}
+          <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
+        </>
+      )}
 
       {procCount !== null && (
         <>
@@ -266,7 +543,36 @@ export default function StatChips() {
               </button>
             </PopoverTrigger>
             <PopoverContent side="bottom" align="end">
-              <ProcessList processes={processes} sessionId={currentSessionId} />
+              <ProcessList processes={processes} sessionId={sessionId} />
+            </PopoverContent>
+          </Popover>
+        </>
+      )}
+
+      {sessionUrls.length > 0 && (
+        <>
+          {SEP}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                  borderRadius: 4,
+                }}
+                className="hover:bg-white/5"
+                title="Show links"
+              >
+                <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
+                  LINKS
+                </span>
+                <span style={{ fontSize: 13, color: '#58a6ff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 700, lineHeight: 1 }}>
+                  {sessionUrls.length}
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="bottom" align="end">
+              <UrlList urls={sessionUrls} />
             </PopoverContent>
           </Popover>
         </>

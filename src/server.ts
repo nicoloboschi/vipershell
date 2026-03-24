@@ -128,12 +128,17 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
 
           case 'connect': {
             const sessionId = msg.session_id as string;
-            subscribeToSession(sessionId);
+            // Set session ID early so resize messages (sent by the client on
+            // 'connected') are processed while the snapshot is being built.
+            // We do NOT subscribe to output yet — that prevents live PTY output
+            // from racing the snapshot and arriving before it.
+            state.unsubOutput?.();
+            state.sessionId = sessionId;
             send({ type: 'connected' });
-            // Send snapshot
             const snap = await bridge.snapshot(sessionId);
-            if (snap) send({ type: 'output', data: snap });
-            // Ensure PTY is running for live output
+            send({ type: 'output', data: snap });
+            // Now subscribe to live output (snapshot already sent, no race)
+            subscribeToSession(sessionId);
             await bridge.connectSession(sessionId);
             break;
           }
