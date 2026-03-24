@@ -173,6 +173,7 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
         <div style={{
           flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: '#0d1117', color: 'var(--muted-foreground)',
+          minHeight: 0, minWidth: 0,
         }}>
           <Loader2 size={20} className="animate-spin" />
         </div>
@@ -202,36 +203,36 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
       {layout === 'single' && renderCell(0)}
 
       {layout === 'horizontal' && (
-        <PanelGroup orientation="horizontal" style={{ flex: 1 }}>
-          <Panel minSize={15}>{renderCell(0)}</Panel>
+        <PanelGroup orientation="horizontal" style={{ flex: 1, display: 'flex' }}>
+          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
           {handle('horizontal')}
-          <Panel minSize={15}>{renderCell(1)}</Panel>
+          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
         </PanelGroup>
       )}
 
       {layout === 'vertical' && (
-        <PanelGroup orientation="vertical" style={{ flex: 1 }}>
-          <Panel minSize={15}>{renderCell(0)}</Panel>
+        <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
           {handle('vertical')}
-          <Panel minSize={15}>{renderCell(1)}</Panel>
+          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
         </PanelGroup>
       )}
 
       {layout === 'quad' && (
-        <PanelGroup orientation="horizontal" style={{ flex: 1 }}>
-          <Panel minSize={15}>
-            <PanelGroup orientation="vertical">
-              <Panel minSize={15}>{renderCell(0)}</Panel>
+        <PanelGroup orientation="horizontal" style={{ flex: 1, display: 'flex' }}>
+          <Panel minSize={15} style={{ display: 'flex' }}>
+            <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
               {handle('vertical')}
-              <Panel minSize={15}>{renderCell(2)}</Panel>
+              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(2)}</Panel>
             </PanelGroup>
           </Panel>
           {handle('horizontal')}
-          <Panel minSize={15}>
-            <PanelGroup orientation="vertical">
-              <Panel minSize={15}>{renderCell(1)}</Panel>
+          <Panel minSize={15} style={{ display: 'flex' }}>
+            <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
               {handle('vertical')}
-              <Panel minSize={15}>{renderCell(3)}</Panel>
+              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(3)}</Panel>
             </PanelGroup>
           </Panel>
         </PanelGroup>

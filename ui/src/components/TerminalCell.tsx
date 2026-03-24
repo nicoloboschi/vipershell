@@ -192,17 +192,22 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onClose,
     return () => { window.removeEventListener('resize', handleResize); if (timer) clearTimeout(timer); };
   }, []);
 
-  // ResizeObserver on container for panel resize
+  // ResizeObserver on container for panel resize (debounced)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      fitAddonRef.current?.fit();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const doFit = () => {
+      try { fitAddonRef.current?.fit(); } catch { /* ignore */ }
       const term = termRef.current;
       if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
+    };
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(doFit, 50);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
   }, []);
 
   // Focus when active
@@ -261,9 +266,11 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onClose,
 
   return (
     <div
-      className="flex-1 relative min-h-0 min-w-0"
+      className="flex-1 min-h-0 min-w-0"
       style={{
-        background: '#0d1117',
+        position: 'relative',
+        display: 'flex', flexDirection: 'column',
+        background: '#0d1117', overflow: 'hidden',
         outline: isActive ? '1px solid var(--primary)' : '1px solid transparent',
         outlineOffset: -1,
       }}

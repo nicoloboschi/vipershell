@@ -784,13 +784,14 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
   router.post('/memory/ui', async (req, res) => {
     if (!memory.active) return res.json({ active: false, url: null });
 
-    const host = req.headers.host?.split(':')[0] ?? '127.0.0.1';
+    const browserHost = req.headers.host?.split(':')[0] ?? '127.0.0.1';
     const cfg = memory.getConfig();
-    const proxyUrl = `${req.protocol}://${req.headers.host}/api/hindsight`;
-    const url = await memory.startUi(proxyUrl);
+    // Pass the daemon URL directly — control plane server-side can always reach it
+    const url = await memory.startUi();
     if (!url) return res.json({ active: false, url: null });
 
-    const uiUrl = `${req.protocol}://${host}:${cfg.uiPort}`;
+    // Return URL using the same hostname the user is browsing with
+    const uiUrl = `${req.protocol}://${browserHost}:${cfg.uiPort}`;
     res.json({ active: true, url: uiUrl });
   });
 
