@@ -683,6 +683,42 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     res.json({ ok: true });
   });
 
+  router.get('/memory/claude-code-status', async (_req, res) => {
+    const configPath = nodePath.join(os.homedir(), '.hindsight', 'claude-code.json');
+    let configExists = false;
+    let configUrl = '';
+    try {
+      const data = JSON.parse(readFileSync(configPath, 'utf-8'));
+      configExists = true;
+      configUrl = data.hindsightApiUrl ?? '';
+    } catch { /* no config */ }
+
+    let pluginInstalled = false;
+    let pluginEnabled = false;
+    try {
+      const { stdout } = await execAsync('claude plugin list 2>/dev/null', { timeout: 10_000 });
+      const lines = stdout.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (line.includes('hindsight-memory@hindsight')) {
+          pluginInstalled = true;
+          // Check next few lines for status
+          for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+            if (lines[j]!.includes('enabled')) { pluginEnabled = true; break; }
+          }
+          break;
+        }
+      }
+    } catch { /* claude CLI not available */ }
+
+    res.json({
+      pluginInstalled,
+      pluginEnabled,
+      configExists,
+      configUrl,
+    });
+  });
+
   router.post('/memory/claude-code-setup', async (req, res) => {
     if (!memory.active) return res.json({ ok: false, error: 'Hindsight not running' });
 

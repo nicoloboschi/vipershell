@@ -43,11 +43,21 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
   const [ccState, setCcState] = useState<AsyncState>('idle');
   const [ccError, setCcError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [ccStatus, setCcStatus] = useState<{
+    pluginInstalled: boolean;
+    pluginEnabled: boolean;
+    configExists: boolean;
+    configUrl: string;
+  } | null>(null);
 
   useEffect(() => {
     fetch('/api/memory/config')
       .then(r => r.json())
       .then(setCfg)
+      .catch(() => {});
+    fetch('/api/memory/claude-code-status')
+      .then(r => r.json())
+      .then(setCcStatus)
       .catch(() => {});
   }, []);
 
@@ -81,7 +91,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     try {
       const res = await fetch('/api/memory/claude-code-setup', { method: 'POST' });
       const { ok, error } = await res.json();
-      if (ok) { setCcState('ok'); }
+      if (ok) {
+        setCcState('ok');
+        // Refresh status
+        fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {});
+      }
       else { setCcState('error'); setCcError(error || 'Unknown error'); }
     } catch {
       setCcState('error'); setCcError('Request failed');
@@ -177,19 +191,35 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                 </div>
               </div>
 
+              {/* Status */}
+              {ccStatus && (
+                <div className="rounded-md border border-border px-3 py-2.5 flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ccStatus.pluginInstalled && ccStatus.pluginEnabled ? 'bg-green-500' : ccStatus.pluginInstalled ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-muted-foreground">
+                      Plugin: {ccStatus.pluginInstalled ? (ccStatus.pluginEnabled ? <span className="text-green-500 font-medium">installed & enabled</span> : <span className="text-yellow-500 font-medium">installed (not enabled)</span>) : <span className="text-muted-foreground">not installed</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ccStatus.configExists ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-muted-foreground">
+                      Config: {ccStatus.configExists ? (
+                        <>
+                          <span className="text-green-500 font-medium">configured</span>
+                          {ccStatus.configUrl && <span className="text-muted-foreground"> &rarr; <code className="text-[10px] bg-muted px-1 rounded">{ccStatus.configUrl}</code></span>}
+                        </>
+                      ) : <span className="text-muted-foreground">not configured</span>}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Install the{' '}
                 <strong className="text-foreground">Hindsight plugin</strong> for Claude Code.
                 It automatically captures conversations and recalls relevant context &mdash;
                 Claude gains memory across all sessions powered by vipershell&apos;s Hindsight.
               </p>
-
-              {/* What it does */}
-              <ul className="text-xs text-muted-foreground leading-loose list-disc pl-4">
-                <li><strong className="text-foreground">Auto-recall</strong> &mdash; queries memories on every prompt, injects relevant context</li>
-                <li><strong className="text-foreground">Auto-retain</strong> &mdash; extracts and stores conversation content after responses</li>
-                <li>Zero dependencies, uses Claude Code&apos;s hook-based plugin system</li>
-              </ul>
 
               {/* Auto-install button */}
               <div
