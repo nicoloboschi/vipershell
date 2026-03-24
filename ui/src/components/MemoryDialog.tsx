@@ -61,10 +61,21 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
       .catch(() => {});
   }, []);
 
+  const [cpError, setCpError] = useState('');
+
   async function openControlPlane() {
-    const res = await fetch('/api/memory/ui', { method: 'POST' });
-    const { active, url } = await res.json();
-    if (active && url) window.open(url, '_blank');
+    setCpError('');
+    try {
+      const res = await fetch('/api/memory/ui', { method: 'POST' });
+      const { active, url } = await res.json();
+      if (active && url) {
+        window.open(url, '_blank');
+      } else {
+        setCpError('Hindsight is not active yet. Enable it in Settings and wait for it to start.');
+      }
+    } catch {
+      setCpError('Failed to start control plane.');
+    }
   }
 
   async function saveAndRestart() {
@@ -173,6 +184,7 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                 <ExternalLink size={13} />
                 Open Control Plane
               </Button>
+              {cpError && <p className="text-xs text-destructive">{cpError}</p>}
             </>
           )}
 
