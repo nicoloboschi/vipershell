@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
+import { ArrowDown } from 'lucide-react';
 import useStore, { activeTerminalSend, activeTerminalRefresh } from '../store';
 
 const filterAltScreen = (data: string): string =>
@@ -38,6 +39,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   const sendRef = useRef<(msg: Record<string, unknown>) => void>(() => {});
   const pendingResetRef = useRef(false);
   const mountedRef = useRef(true);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   // Create terminal once
   useEffect(() => {
@@ -70,6 +72,14 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       sendRef.current({ type: 'input', data });
     });
 
+    // Scroll position tracking — show "jump to bottom" when scrolled up
+    const SCROLL_THRESHOLD = 5; // lines from bottom to trigger
+    const scrollDispose = term.onScroll(() => {
+      const buf = term.buffer.active;
+      const linesFromBottom = buf.baseY - buf.viewportY;
+      setShowScrollBottom(linesFromBottom > SCROLL_THRESHOLD);
+    });
+
     // Bell — notify user when a background session rings (e.g. Claude Code finished)
     const bellDispose = term.onBell(() => {
       const state = useStore.getState();
@@ -80,6 +90,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     });
 
     return () => {
+      scrollDispose.dispose();
       dataDispose.dispose();
       bellDispose.dispose();
       term.dispose();
@@ -391,6 +402,41 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
         ref={containerRef}
         style={{ position: 'absolute', inset: 0, padding: 8, overflow: 'hidden' }}
       />
+      {showScrollBottom && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            termRef.current?.scrollToBottom();
+            setShowScrollBottom(false);
+          }}
+          style={{
+            position: 'absolute',
+            bottom: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '5px 14px',
+            borderRadius: 20,
+            border: '1px solid var(--border)',
+            background: 'rgba(22, 27, 34, 0.92)',
+            backdropFilter: 'blur(8px)',
+            color: 'var(--muted-foreground)',
+            fontSize: 11,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            transition: 'opacity 0.15s, transform 0.15s',
+            animation: 'fade-in 0.15s ease',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.borderColor = 'var(--primary)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--muted-foreground)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+        >
+          <ArrowDown size={12} />
+          Bottom
+        </button>
+      )}
     </div>
   );
 }
