@@ -161,13 +161,19 @@ export class AIService {
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this session. Start with a relevant emoji. Just output the name, nothing else. No quotes.\n\nTerminal output:\n${snippet}`;
 
       const cli = provider === 'claude-code' ? 'claude' : 'codex';
-      const name = (await runWithStdin(cli, ['--print', '-'], prompt)).trim();
+      const args = cli === 'claude'
+        ? ['--print', '--model', 'haiku', '-']
+        : ['--print', '-'];
+
+      logger.debug(`AI naming ${sessionId}: calling ${cli} (${snippet.length} chars input)`);
+      const t0 = Date.now();
+      const name = (await runWithStdin(cli, args, prompt)).trim();
+      logger.debug(`AI naming ${sessionId}: got "${name}" in ${Date.now() - t0}ms`);
 
       if (!name || name.length > 80 || name.includes('\n')) return;
 
-      // Rename the tmux session
       await this.bridge!.renameSession(sessionId, name);
-      logger.debug(`AI renamed session ${sessionId} → "${name}"`);
+      logger.info(`AI renamed ${sessionId} → "${name}"`);
     } catch (e) {
       logger.debug(`AI naming failed for ${sessionId}: ${e}`);
     }
