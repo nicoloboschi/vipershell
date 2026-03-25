@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Loader2 } from 'lucide-react';
 import TerminalCell from './TerminalCell';
 import useStore from '../store';
@@ -39,10 +38,22 @@ function layoutCellCount(layout: Layout): number {
   }
 }
 
+/** CSS grid template for each layout. Cells are always in order: 0,1,2,3. */
+function gridStyle(layout: Layout): React.CSSProperties {
+  switch (layout) {
+    case 'single':
+      return { gridTemplateColumns: '1fr', gridTemplateRows: '1fr' };
+    case 'horizontal':
+      return { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' };
+    case 'vertical':
+      return { gridTemplateColumns: '1fr', gridTemplateRows: '1fr 1fr' };
+    case 'quad':
+      return { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' };
+  }
+}
+
 export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
   const [layout, setLayout] = useState<Layout>('single');
-  // All cells ever created for this session. Index 0 is always the main session.
-  // null = still being created. Sessions persist even when layout shrinks.
   const [cells, setCells] = useState<(string | null)[]>([sessionId]);
   const [activeCell, setActiveCell] = useState(0);
   const creatingRef = useRef(false);
@@ -53,7 +64,6 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
     if (saved && saved.cells.length > 0 && saved.cells[0] === sessionId) {
       setLayout(saved.layout);
       setCells(saved.cells);
-      // Re-register split sessions
       for (let i = 1; i < saved.cells.length; i++) {
         if (saved.cells[i]) useStore.getState().addSplitSession(saved.cells[i]!);
       }
@@ -64,7 +74,6 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
     setActiveCell(0);
 
     return () => {
-      // Unregister splits when switching away (they stay alive on the server)
       const stored = loadGridState(sessionId);
       if (stored) {
         for (let i = 1; i < stored.cells.length; i++) {
@@ -82,18 +91,15 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
   }, [sessionId, layout, cells]);
 
   // Create any missing sessions in parallel
-  const ensureCells = useCallback(async (needed: number) => {
+  const ensureCells = useCallback((needed: number) => {
     if (creatingRef.current) return;
-    // Use functional state to get the latest cells
     setCells(currentCells => {
       const have = currentCells.length;
       if (have >= needed) return currentCells;
 
       const toCreate = needed - have;
-      // Add null placeholders immediately
       const next = [...currentCells, ...Array(toCreate).fill(null) as null[]];
 
-      // Create all in parallel
       creatingRef.current = true;
       const promises = Array.from({ length: toCreate }, (_, i) => {
         const idx = have + i;
@@ -127,90 +133,48 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
 
   const visibleCount = layoutCellCount(layout);
 
-  const renderCell = (index: number) => {
-    const sid = cells[index];
-    if (sid === null || sid === undefined) {
-      return (
-        <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: '#0d1117', color: 'var(--muted-foreground)',
-          minHeight: 0, minWidth: 0,
-        }}>
-          <Loader2 size={20} className="animate-spin" />
-        </div>
-      );
-    }
-    return (
-      <TerminalCell
-        key={sid}
-        sessionId={sid}
-        isActive={activeCell === index}
-        onActivate={() => setActiveCell(index)}
-        onFileLinkClick={onFileLinkClick}
-      />
-    );
-  };
-
-  const handle = (dir: 'horizontal' | 'vertical') => (
-    <PanelResizeHandle
-      className={`terminal-resize-handle terminal-resize-handle-${dir}`}
-    />
-  );
-
-  // Render hidden cells so their WS connections stay alive
-  const hiddenCells = cells.slice(visibleCount).filter((sid): sid is string => sid !== null);
-
   return (
-    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-      {layout === 'single' && renderCell(0)}
-
-      {layout === 'horizontal' && (
-        <PanelGroup orientation="horizontal" style={{ flex: 1, display: 'flex' }}>
-          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
-          {handle('horizontal')}
-          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
-        </PanelGroup>
-      )}
-
-      {layout === 'vertical' && (
-        <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
-          {handle('vertical')}
-          <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
-        </PanelGroup>
-      )}
-
-      {layout === 'quad' && (
-        <PanelGroup orientation="horizontal" style={{ flex: 1, display: 'flex' }}>
-          <Panel minSize={15} style={{ display: 'flex' }}>
-            <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(0)}</Panel>
-              {handle('vertical')}
-              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(2)}</Panel>
-            </PanelGroup>
-          </Panel>
-          {handle('horizontal')}
-          <Panel minSize={15} style={{ display: 'flex' }}>
-            <PanelGroup orientation="vertical" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(1)}</Panel>
-              {handle('vertical')}
-              <Panel minSize={15} style={{ display: 'flex' }}>{renderCell(3)}</Panel>
-            </PanelGroup>
-          </Panel>
-        </PanelGroup>
-      )}
-
-      {/* Keep hidden split sessions alive (WS connected, just not visible) */}
-      {hiddenCells.map(sid => (
-        <div key={sid} style={{ display: 'none' }}>
-          <TerminalCell
-            sessionId={sid}
-            isActive={false}
-            onActivate={() => {}}
-            onFileLinkClick={onFileLinkClick}
-          />
-        </div>
-      ))}
+    <div
+      style={{
+        display: 'grid',
+        flex: 1,
+        minHeight: 0,
+        gap: 1,
+        background: 'var(--border)',
+        transition: 'grid-template-columns 0.2s ease, grid-template-rows 0.2s ease',
+        ...gridStyle(layout),
+      }}
+    >
+      {cells.map((sid, index) => {
+        const visible = index < visibleCount;
+        return (
+          <div
+            key={sid ?? `loading-${index}`}
+            style={{
+              display: visible ? 'flex' : 'none',
+              minHeight: 0,
+              minWidth: 0,
+              overflow: 'hidden',
+            }}
+          >
+            {sid === null ? (
+              <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: '#0d1117', color: 'var(--muted-foreground)',
+              }}>
+                <Loader2 size={20} className="animate-spin" />
+              </div>
+            ) : (
+              <TerminalCell
+                sessionId={sid}
+                isActive={activeCell === index}
+                onActivate={() => setActiveCell(index)}
+                onFileLinkClick={onFileLinkClick}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
