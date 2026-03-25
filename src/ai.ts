@@ -165,14 +165,42 @@ export class AIService {
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this session. Start with a relevant emoji. Just output the name, nothing else. No quotes.\n\nTerminal output:\n${snippet}`;
 
       const cli = provider === 'claude-code' ? 'claude' : 'codex';
-      const args = cli === 'claude'
-        ? ['-p', '--model', 'haiku', prompt]
-        : ['-p', prompt];
 
       logger.debug(`AI naming ${sessionId}: calling ${cli} (${snippet.length} chars of terminal)`);
       const t0 = Date.now();
-      const raw = await runWithStdin(cli, args, '');
-      const name = raw.trim();
+
+      let name: string;
+      if (cli === 'claude') {
+        // Use --verbose --output-format json to get the full message array,
+        // then extract the assistant text. Plain -p returns empty result field.
+        const raw = await runWithStdin(
+          'claude',
+          ['-p', '--model', 'haiku', '--verbose', '--output-format', 'json', prompt],
+          '',
+        );
+        name = '';
+        try {
+          const events = JSON.parse(raw);
+          if (Array.isArray(events)) {
+            for (const evt of events) {
+              if (evt.type === 'assistant' && evt.message?.content) {
+                for (const block of evt.message.content) {
+                  if (block.type === 'text' && block.text) { name = block.text.trim(); break; }
+                }
+                if (name) break;
+              }
+            }
+          } else if (events.result) {
+            name = (events.result as string).trim();
+          }
+        } catch {
+          // If JSON parse fails, try using raw output
+          name = raw.trim();
+        }
+      } else {
+        name = (await runWithStdin('codex', ['-p', prompt], '')).trim();
+      }
+
       logger.debug(`AI naming ${sessionId}: got "${name}" in ${Date.now() - t0}ms`);
 
       if (!name || name.length > 80 || name.includes('\n')) return;
