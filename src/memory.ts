@@ -173,6 +173,9 @@ export class MemoryStore {
     } catch { /* bank already exists */ }
 
     logger.info(`Hindsight memory ready (external) at ${this._resolvedUrl} (bank=${BANK_ID})`);
+
+    // Auto-start control plane UI
+    this.startUi().catch(() => {});
   }
 
   private async _startEmbedded(
@@ -204,6 +207,9 @@ export class MemoryStore {
 
     this._startKeepalive(cfg);
     logger.info(`Hindsight memory ready (embedded) at ${this._resolvedUrl} (bank=${BANK_ID}, llm=${cfg.llmProvider})`);
+
+    // Auto-start control plane UI
+    this.startUi().catch(() => {});
   }
 
   async restart(): Promise<void> {

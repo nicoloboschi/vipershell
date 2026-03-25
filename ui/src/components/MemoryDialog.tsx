@@ -226,17 +226,9 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                         Control Plane: {srv.controlPlaneActive ? <span className="text-green-500 font-medium">running</span> : 'not running'}
                       </span>
                     </div>
-                    {srv.controlPlaneActive ? (
+                    {srv.controlPlaneActive && (
                       <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] flex items-center gap-1" onClick={openControlPlane}>
                         <ExternalLink size={10} /> Open
-                      </Button>
-                    ) : srv.active && (
-                      <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] flex items-center gap-1" onClick={async () => {
-                        await openControlPlane();
-                        // Refresh status after starting
-                        setTimeout(() => fetch('/api/memory/config').then(r => r.json()).then(setSrv).catch(() => {}), 3000);
-                      }}>
-                        <Power size={10} /> Start & Open
                       </Button>
                     )}
                   </div>
