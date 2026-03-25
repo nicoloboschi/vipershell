@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { notify } from './utils';
 import { applyTheme, DEFAULT_THEME } from './themes';
 
 export interface Session {
@@ -202,6 +203,12 @@ const useStore = create<StoreState>((set, get) => ({
         clearTimeout(pending);
         _busyTimers.delete(sessionId);
         return;
+      }
+      const { sessionBusy, sessionMap } = get();
+      const wasBusy = sessionBusy[sessionId] ?? false;
+      if (wasBusy && sessionId !== currentSessionId) {
+        const name = sessionMap[sessionId]?.name ?? 'terminal';
+        notify('vipershell \u{1F40D}', `${name} finished`);
       }
       set(s => ({ sessionBusy: { ...s.sessionBusy, [sessionId]: false } }));
     }
