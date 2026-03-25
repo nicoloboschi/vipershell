@@ -162,7 +162,7 @@ export class AIService {
       // Take last 2000 chars to keep prompt small
       const snippet = text.length > 2000 ? text.slice(-2000) : text;
 
-      const prompt = `Based on this terminal output, give a very short name (max 6 words) for this session. Start with a relevant emoji. Just output the name, nothing else. No quotes.\n\nTerminal output:\n${snippet}`;
+      const prompt = `Based on this terminal output, give a very short name (max 6 words) for this terminal session. Use lowercase, no title case, no emojis, no quotes. Just output the name, nothing else.\n\nTerminal output:\n${snippet}`;
 
       const cli = provider === 'claude-code' ? 'claude' : 'codex';
 
