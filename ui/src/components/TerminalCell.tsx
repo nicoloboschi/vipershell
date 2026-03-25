@@ -253,21 +253,39 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     return () => window.removeEventListener('vipershell:terminal-tab-active', handler);
   }, [isActive]);
 
-  // Touch scroll
+  // Touch scroll with momentum (iOS-style inertial scrolling)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    let lastTouchY = 0, accPx = 0, isTouchScrolling = false;
+    let lastTouchY = 0, lastTouchTime = 0;
+    let accPx = 0, isTouchScrolling = false;
+    let velocity = 0;
+    let momentumRaf = 0;
+
+    const stopMomentum = () => {
+      if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = 0; }
+      velocity = 0;
+    };
 
     const onTouchStart = (e: TouchEvent): void => {
+      stopMomentum();
       lastTouchY = e.touches[0]!.clientY;
-      accPx = 0; isTouchScrolling = false;
+      lastTouchTime = Date.now();
+      accPx = 0; isTouchScrolling = false; velocity = 0;
     };
     const onTouchMove = (e: TouchEvent): void => {
       const term = termRef.current;
       if (!term) return;
-      const dy = lastTouchY - e.touches[0]!.clientY;
-      lastTouchY = e.touches[0]!.clientY;
+      const now = Date.now();
+      const y = e.touches[0]!.clientY;
+      const dy = lastTouchY - y;
+      const dt = Math.max(1, now - lastTouchTime);
+
+      // Track velocity (px/ms) with smoothing
+      velocity = 0.6 * velocity + 0.4 * (dy / dt);
+
+      lastTouchY = y;
+      lastTouchTime = now;
       accPx += dy;
       const lineH = (term.options?.fontSize ?? 14) * (term.options?.lineHeight ?? 1.2);
       const lines = Math.trunc(accPx / lineH);
@@ -278,7 +296,34 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       }
       if (isTouchScrolling) { e.preventDefault(); e.stopPropagation(); }
     };
-    const onTouchEnd = (): void => { isTouchScrolling = false; };
+    const onTouchEnd = (): void => {
+      if (!isTouchScrolling) { velocity = 0; return; }
+      isTouchScrolling = false;
+
+      // Only animate momentum if velocity is significant
+      if (Math.abs(velocity) < 0.3) { velocity = 0; return; }
+
+      const term = termRef.current;
+      if (!term) return;
+      const lineH = (term.options?.fontSize ?? 14) * (term.options?.lineHeight ?? 1.2);
+      let v = velocity * 16; // convert px/ms to px/frame (~16ms)
+      let residual = 0;
+      const FRICTION = 0.95;
+      const MIN_V = 0.5;
+
+      const tick = () => {
+        if (Math.abs(v) < MIN_V) { velocity = 0; return; }
+        residual += v;
+        const lines = Math.trunc(residual / lineH);
+        if (lines !== 0) {
+          residual -= lines * lineH;
+          term.scrollLines(lines);
+        }
+        v *= FRICTION;
+        momentumRaf = requestAnimationFrame(tick);
+      };
+      momentumRaf = requestAnimationFrame(tick);
+    };
     const onWheel = (e: WheelEvent): void => {
       const term = termRef.current;
       if (!term || term.buffer?.active?.type === 'alternate') return;
@@ -301,6 +346,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     el.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
     return () => {
+      stopMomentum();
       el.removeEventListener('touchstart', onTouchStart, { capture: true });
       el.removeEventListener('touchmove', onTouchMove, { capture: true });
       el.removeEventListener('touchend', onTouchEnd, { capture: true });
