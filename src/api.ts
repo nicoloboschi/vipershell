@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, watchFile, unwatchFile } from 'fs';
 import nodePath from 'path';
 import http from 'http';
 import os from 'os';
@@ -632,9 +632,15 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     const target = new URL(`${memory.apiUrl}/${subpath}`);
     if (req.url.includes('?')) target.search = req.url.split('?')[1]!;
 
+    // Re-serialize body since express.json() already consumed the stream
+    const bodyStr = req.body && Object.keys(req.body).length > 0 ? JSON.stringify(req.body) : null;
+
     const proxyHeaders = { ...req.headers };
     delete proxyHeaders['host'];
     delete proxyHeaders['content-length'];
+    if (bodyStr) {
+      proxyHeaders['content-length'] = String(Buffer.byteLength(bodyStr));
+    }
 
     const proxyReq = http.request({
       hostname: target.hostname,
@@ -654,7 +660,11 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       if (!res.headersSent) res.status(502).json({ error: `Proxy error: ${e.message}` });
     });
 
-    req.pipe(proxyReq);
+    if (bodyStr) {
+      proxyReq.end(bodyStr);
+    } else {
+      proxyReq.end();
+    }
   });
 
   // ── Memory config & control ──────────────────────────────────────────────────
@@ -691,6 +701,80 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     });
 
     res.json({ ok: true });
+  });
+
+  // ── Plugin config (writes to ~/.hindsight/claude-code.json, no server restart needed) ──
+
+  const pluginConfigPath = nodePath.join(os.homedir(), '.hindsight', 'claude-code.json');
+
+  router.get('/memory/plugin-config', (_req, res) => {
+    try {
+      const data = JSON.parse(readFileSync(pluginConfigPath, 'utf-8'));
+      res.json(data);
+    } catch {
+      res.json({});
+    }
+  });
+
+  router.post('/memory/plugin-config', (req, res) => {
+    const updates = req.body as Record<string, unknown>;
+    try {
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(readFileSync(pluginConfigPath, 'utf-8')); } catch { /* fresh */ }
+      const merged = { ...existing, ...updates };
+      mkdirSync(nodePath.dirname(pluginConfigPath), { recursive: true });
+      writeFileSync(pluginConfigPath, JSON.stringify(merged, null, 2) + '\n');
+      res.json({ ok: true });
+    } catch (e) {
+      res.json({ ok: false, error: String(e) });
+    }
+  });
+
+  router.get('/memory/logs', (req, res) => {
+    const logPath = memory.logPath;
+    const lines = parseInt(req.query.lines as string) || 200;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Send initial tail
+    try {
+      const content = readFileSync(logPath, 'utf-8');
+      const tail = content.split('\n').slice(-lines).join('\n');
+      res.write(`data: ${JSON.stringify({ type: 'initial', text: tail })}\n\n`);
+    } catch {
+      res.write(`data: ${JSON.stringify({ type: 'initial', text: '(no log file yet)' })}\n\n`);
+    }
+
+    // Watch for changes and stream new content
+    let lastSize = 0;
+    try { lastSize = statSync(logPath).size; } catch { /* file may not exist */ }
+
+    const onChange = () => {
+      try {
+        const currentSize = statSync(logPath).size;
+        if (currentSize > lastSize) {
+          const stream = createReadStream(logPath, { start: lastSize, encoding: 'utf-8' });
+          let chunk = '';
+          stream.on('data', (data) => { chunk += data; });
+          stream.on('end', () => {
+            if (chunk) res.write(`data: ${JSON.stringify({ type: 'append', text: chunk })}\n\n`);
+          });
+          lastSize = currentSize;
+        } else if (currentSize < lastSize) {
+          // File was truncated/rotated — re-read
+          lastSize = currentSize;
+        }
+      } catch { /* ignore */ }
+    };
+
+    watchFile(logPath, { interval: 1000 }, onChange);
+
+    req.on('close', () => {
+      unwatchFile(logPath, onChange);
+    });
   });
 
   router.get('/memory/claude-code-status', async (_req, res) => {

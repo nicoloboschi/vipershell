@@ -395,27 +395,8 @@ export class TmuxBridge {
           preview,
           busy: session.busy,
         });
-        await this._accumulateMemory(session.id, session.path, stdout.trim());
+        // Memory retention is handled by the Claude Code plugin, not the bridge
       } catch { /* ignore */ }
-    }
-  }
-
-  private async _accumulateMemory(sessionId: string, path: string, text: string): Promise<void> {
-    if (!this.memory?.active || !text) return;
-
-    let buf = this.memBuffers.get(sessionId);
-    if (!buf) {
-      buf = { chunks: [], seq: 0, lastText: '' };
-      this.memBuffers.set(sessionId, buf);
-    }
-
-    if (text === buf.lastText) return;
-    buf.chunks.push(text);
-    buf.lastText = text;
-
-    const combined = buf.chunks.join('\n---\n');
-    if (combined.length >= (this.memory.retainChunkChars)) {
-      await this._flushMemory(sessionId, path, buf);
     }
   }
 

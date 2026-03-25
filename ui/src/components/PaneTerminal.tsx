@@ -75,6 +75,16 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Refit + refocus terminal when switching back to terminal tab
+  useEffect(() => {
+    if (activeTab === 'terminal') {
+      // Small delay to let display:none→flex take effect so xterm can measure
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('vipershell:terminal-tab-active'));
+      }, 50);
+    }
+  }, [activeTab]);
+
   // Restore last opened file when switching to files tab
   useEffect(() => {
     if (activeTab !== 'files') return;

@@ -239,6 +239,19 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     }
   }, [isActive]);
 
+  // Refit + refocus when terminal tab becomes visible again
+  useEffect(() => {
+    const handler = () => {
+      if (!isActive) return;
+      fitAddonRef.current?.fit();
+      termRef.current?.focus();
+      const term = termRef.current;
+      if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
+    };
+    window.addEventListener('vipershell:terminal-tab-active', handler);
+    return () => window.removeEventListener('vipershell:terminal-tab-active', handler);
+  }, [isActive]);
+
   // Touch scroll
   useEffect(() => {
     const el = containerRef.current;

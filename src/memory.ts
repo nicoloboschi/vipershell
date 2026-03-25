@@ -10,6 +10,7 @@ const execAsync = promisify(exec);
 
 const BANK_ID = 'vipershell';
 const PROFILE = 'vipershell';
+const LOG_PATH = join(homedir(), '.hindsight', 'profiles', `${PROFILE}.log`);
 const DEFAULT_EMBEDDED_URL = 'http://127.0.0.1:9027';
 const HEALTH_TIMEOUT_MS = 90_000;
 const HEALTH_POLL_MS = 500;
@@ -50,6 +51,8 @@ export class MemoryStore {
   private uiProcess: ChildProcess | null = null;
   private keepaliveTimer: NodeJS.Timeout | null = null;
   private _startedAt: number | null = null;
+
+  get logPath(): string { return LOG_PATH; }
   private _resolvedUrl: string = DEFAULT_EMBEDDED_URL;
   private _mode: HindsightMode = 'embedded';
 
