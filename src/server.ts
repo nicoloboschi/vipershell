@@ -8,6 +8,7 @@ import { TmuxBridge } from './bridge.js';
 import { createApiRouter } from './api.js';
 import type { BridgeMessage } from './bridge.js';
 import type { MemoryStore } from './memory.js';
+import type { AIService } from './ai.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -66,12 +67,12 @@ interface ClientState {
 
 // ── Server factory ────────────────────────────────────────────────────────────
 
-export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
+export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIService) {
   const app = express();
   app.use(express.json());
 
   // REST API
-  app.use('/api', createApiRouter(bridge, logBuffer, memory));
+  app.use('/api', createApiRouter(bridge, logBuffer, memory, ai));
 
   const server = createServer(app);
 

@@ -6,6 +6,7 @@ import { createApiRouter } from '../api.js'
 import type { TmuxBridge } from '../bridge.js'
 import type { MemoryStore, MemoryConfig } from '../memory.js'
 import type { LogBuffer } from '../server.js'
+import type { AIService } from '../ai.js'
 
 // ── Mock bridge ──────────────────────────────────────────────────────────────
 
@@ -63,7 +64,15 @@ beforeAll(() => {
   return new Promise<void>((resolve) => {
     const app = express()
     app.use(express.json())
-    app.use('/api', createApiRouter(mockBridge, mockLogBuffer, mockMemory))
+    const mockAI = {
+      getConfig: vi.fn().mockReturnValue({ aiEnabled: false, aiProvider: 'claude-code', autoNaming: false, autoNamingIntervalSecs: 30 }),
+      saveConfig: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      restart: vi.fn(),
+      setBridge: vi.fn(),
+    } as unknown as AIService
+    app.use('/api', createApiRouter(mockBridge, mockLogBuffer, mockMemory, mockAI))
 
     server = createServer(app)
     server.listen(0, '127.0.0.1', () => {

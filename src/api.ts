@@ -9,10 +9,11 @@ import si from 'systeminformation';
 import type { TmuxBridge } from './bridge.js';
 import type { LogBuffer } from './server.js';
 import type { MemoryStore } from './memory.js';
+import type { AIService } from './ai.js';
 
 const execAsync = promisify(exec);
 
-export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory: MemoryStore): Router {
+export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory: MemoryStore, ai: AIService): Router {
   const router = Router();
 
   router.get('/version', (_req, res) => {
@@ -917,6 +918,29 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     // Return URL using the same hostname the user is browsing with
     const uiUrl = `${req.protocol}://${browserHost}:${cfg.uiPort}`;
     res.json({ active: true, url: uiUrl });
+  });
+
+  // ── AI Features ──────────────────────────────────────────────────────────────
+
+  router.get('/ai/config', (_req, res) => {
+    res.json(ai.getConfig());
+  });
+
+  router.post('/ai/config', (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const cfg = ai.getConfig();
+
+    ai.saveConfig({
+      aiEnabled: body.aiEnabled !== undefined ? Boolean(body.aiEnabled) : cfg.aiEnabled,
+      aiProvider: typeof body.aiProvider === 'string' && (body.aiProvider === 'claude-code' || body.aiProvider === 'codex')
+        ? body.aiProvider : cfg.aiProvider,
+      autoNaming: body.autoNaming !== undefined ? Boolean(body.autoNaming) : cfg.autoNaming,
+      autoNamingIntervalSecs: typeof body.autoNamingIntervalSecs === 'number'
+        ? body.autoNamingIntervalSecs : cfg.autoNamingIntervalSecs,
+    });
+
+    ai.restart();
+    res.json({ ok: true });
   });
 
   return router;

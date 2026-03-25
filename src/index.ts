@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import { TmuxBridge } from './bridge.js';
 import { MemoryStore } from './memory.js';
+import { AIService } from './ai.js';
 import { createApp, logger } from './server.js';
 import { config } from './config.js';
 
@@ -25,14 +26,19 @@ program
     bridge.setMemory(memory);
     await bridge.start();
 
-    const server = await createApp(bridge, memory);
+    const ai = new AIService();
+    ai.setBridge(bridge);
+    ai.start();
+
+    const server = await createApp(bridge, memory, ai);
 
     server.listen(port, host, () => {
       logger.info(`vipershell listening on http://${host}:${port}`);
     });
 
     const shutdown = async () => {
-      logger.info('Shutting down…');
+      logger.info('Shutting down\u2026');
+      ai.stop();
       bridge.stop();
       memory.close();
       server.close();

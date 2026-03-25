@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home } from 'lucide-react';
+import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home, Sparkles } from 'lucide-react';
 import { tildefy } from '../utils';
 import useStore, { activeTerminalSend } from '../store';
 import SessionList from './SessionList';
@@ -8,6 +8,7 @@ import ThemeDialog from './ThemeDialog';
 import CommandsDialog, { loadCommands } from './CommandsDialog';
 import MemoryDialog from './MemoryDialog';
 import ShortcutsDialog from './ShortcutsDialog';
+import AIFeaturesDialog from './AIFeaturesDialog';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -32,6 +33,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
   const [showCommands, setShowCommands] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showAI, setShowAI] = useState(false);
   const [commands, setCommands] = useState(loadCommands);
   const [version, setVersion] = useState<string | null>(null);
   const [hindsightUp, setHindsightUp] = useState<boolean | null>(null);
@@ -222,6 +224,11 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
               <Keyboard size={14} />
               Keyboard Shortcuts
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setShowAI(true)}>
+              <Sparkles size={14} />
+              AI Features
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -231,6 +238,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
       {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}
       {showCommands && <CommandsDialog onClose={() => { setShowCommands(false); setCommands(loadCommands()); }} />}
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
+      {showAI && <AIFeaturesDialog onClose={() => setShowAI(false)} />}
     </aside>
   );
 }
