@@ -205,6 +205,8 @@ export class AIService {
 
       if (!name || name.length > 80 || name.includes('\n')) return;
 
+      // Disable tmux automatic-rename so it doesn't overwrite our name
+      await execAsync(`tmux set-option -t '${sessionId.replace(/'/g, "'\\''")}' automatic-rename off 2>/dev/null`).catch(() => {});
       await this.bridge!.renameSession(sessionId, name);
       logger.info(`AI renamed ${sessionId} → "${name}"`);
     } catch (e) {
