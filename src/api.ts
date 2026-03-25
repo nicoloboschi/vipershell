@@ -121,6 +121,16 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  router.post('/sessions', async (req, res) => {
+    try {
+      const { path } = req.body as { path?: string };
+      const sessionId = await bridge.createSession(path ?? undefined);
+      res.json({ ok: true, session_id: sessionId });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e) });
+    }
+  });
+
   router.post('/sessions/:id/rename', async (req, res) => {
     try {
       const { name } = req.body as { name?: string };

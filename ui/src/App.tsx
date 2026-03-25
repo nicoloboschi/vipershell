@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import useStore from './store';
+import useStore, { activeTerminalSend } from './store';
 import { requestNotificationPermission } from './utils';
 import { applyTheme } from './themes';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -47,11 +47,22 @@ export default function App() {
         }
         break;
       }
-      case 'session_created':
-        connectSession(msg.session_id as string);
+      case 'session_created': {
+        // Don't switch to the session if it's a terminal split
+        const newId = msg.session_id as string;
+        if (!store.splitSessionIds.has(newId)) {
+          connectSession(newId);
+        }
         break;
+      }
       case 'preview':
         store.updatePreview(msg.session_id as string, msg.preview as string, msg.busy as boolean | undefined);
+        break;
+      case 'last_command':
+        store.setLastCommand(msg.session_id as string, msg.command as string);
+        break;
+      case 'current_input':
+        store.setCurrentInput(msg.session_id as string, msg.input as string);
         break;
       default: break;
     }
@@ -231,7 +242,7 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
                 ? <DropdownMenuItem disabled><span className="text-xs text-muted-foreground">No saved commands</span></DropdownMenuItem>
                 : commands.map(c => (
                   <DropdownMenuItem key={c.id} onClick={() => {
-                    if (currentSessionId) send({ type: 'input', data: c.command + '\r' });
+                    activeTerminalSend.current({ type: 'input', data: c.command + '\r' });
                   }}>
                     <TerminalSquare size={13} /><span className="truncate text-xs">{c.name}</span>
                   </DropdownMenuItem>
@@ -321,16 +332,18 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
       {showSessions && (
         <>
           <div className="md:hidden fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setShowSessions(false)} />
-          <div className="md:hidden fixed left-0 right-0 z-50 flex flex-col rounded-b-2xl border-b border-x overflow-hidden"
-            style={{ top: 48, maxHeight: '65vh', background: 'var(--card)', borderColor: 'var(--border)' }}>
+          <div className="md:hidden fixed left-0 right-0 z-50 flex flex-col rounded-b-2xl border-b border-x"
+            style={{ top: 48, maxHeight: '65vh', background: 'var(--card)', borderColor: 'var(--border)', overflow: 'hidden' }}>
             <div className="px-4 py-3 border-b shrink-0 flex items-center" style={{ borderColor: 'var(--border)' }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>Sessions</span>
             </div>
-            <SessionList
-              id="topbar-session-list"
-              onConnect={(id) => { onConnect(id); setShowSessions(false); }}
-              send={send}
-            />
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+              <SessionList
+                id="topbar-session-list"
+                onConnect={(id) => { onConnect(id); setShowSessions(false); }}
+                send={send}
+              />
+            </div>
           </div>
         </>
       )}

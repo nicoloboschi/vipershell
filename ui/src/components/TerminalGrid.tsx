@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import TerminalCell from './TerminalCell';
 import useStore from '../store';
 
@@ -15,6 +15,8 @@ interface TerminalGridProps {
   onCloseSplit?: (sessionId: string) => void;
   /** Called when a file link is clicked in the terminal */
   onFileLinkClick?: (path: string) => void;
+  /** Exposes layout state and change handler to parent */
+  onLayoutReady?: (info: { layout: Layout; changeLayout: (l: Layout) => void }) => void;
 }
 
 const LS_KEY = 'vipershell:term-grid';
@@ -34,7 +36,7 @@ function saveGridState(sessionId: string, layout: Layout, cells: string[]): void
   } catch { /* ignore */ }
 }
 
-export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, onFileLinkClick }: TerminalGridProps) {
+export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
   const [layout, setLayout] = useState<Layout>('single');
   // cells: string = session ID, null = loading placeholder
   const [cells, setCells] = useState<(string | null)[]>([sessionId]);
@@ -103,7 +105,6 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
         onCreateSplit().then(newId => {
           pendingRef.current--;
           if (newId) {
-            useStore.getState().addSplitSession(newId);
             setCells(prev => {
               const next = [...prev];
               next[idx] = newId;
@@ -115,14 +116,22 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
     }
   }, [cells, sessionId, onCreateSplit, onCloseSplit]);
 
+  // Expose layout state to parent
+  useEffect(() => {
+    onLayoutReady?.({ layout, changeLayout: addSplit });
+  }, [layout, addSplit, onLayoutReady]);
+
   const closeCell = useCallback((index: number) => {
     if (cells.length <= 1) return;
     const removed = cells[index];
-    const newCells = cells.filter((_, i) => i !== index);
+
+    // Close the split session on the server and unregister it
     if (removed && removed !== sessionId) {
       useStore.getState().removeSplitSession(removed);
       onCloseSplit?.(removed);
     }
+
+    const newCells = cells.filter((_, i) => i !== index);
 
     // Determine new layout
     let newLayout: Layout = 'single';
@@ -132,38 +141,14 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
 
     setCells(newCells);
     setLayout(newLayout);
-    setActiveCell(Math.min(activeCell, newCells.length - 1));
-  }, [cells, sessionId, layout, activeCell, onCloseSplit]);
+    setActiveCell(prev => Math.min(prev, newCells.length - 1));
 
-  const toolbar = (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 1,
-      position: 'absolute', top: 4, right: 4, zIndex: 20,
-      background: 'rgba(13,17,23,0.9)', border: '1px solid var(--border)',
-      borderRadius: 6, padding: '3px 4px',
-    }}>
-      {([
-        { l: 'single' as Layout, icon: <Minus size={15} />, title: 'Single' },
-        { l: 'horizontal' as Layout, icon: <SplitSquareHorizontal size={15} />, title: 'Split horizontal' },
-        { l: 'vertical' as Layout, icon: <SplitSquareVertical size={15} />, title: 'Split vertical' },
-        { l: 'quad' as Layout, icon: <Grid2x2 size={15} />, title: '2\u00d72 grid' },
-      ] as const).map(({ l, icon, title }) => (
-        <button
-          key={l}
-          title={title}
-          onClick={() => addSplit(l)}
-          style={{
-            display: 'flex', alignItems: 'center', padding: 4,
-            background: layout === l ? 'var(--accent)' : 'none',
-            border: 'none', borderRadius: 4, cursor: 'pointer',
-            color: layout === l ? 'var(--foreground)' : 'var(--muted-foreground)',
-          }}
-        >
-          {icon}
-        </button>
-      ))}
-    </div>
-  );
+    // Persist immediately
+    if (newCells.every(c => c !== null)) {
+      saveGridState(sessionId, newLayout, newCells as string[]);
+    }
+  }, [cells, sessionId, layout, onCloseSplit]);
+
 
   const renderCell = (index: number) => {
     const sid = cells[index];
@@ -199,7 +184,6 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
 
   return (
     <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-      {toolbar}
       {layout === 'single' && renderCell(0)}
 
       {layout === 'horizontal' && (

@@ -58,6 +58,9 @@ export interface StoreState {
 // Debounce timers kept outside store state (no re-renders on timer changes)
 const _busyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Active terminal send — updated by TerminalCell when it becomes active
+export const activeTerminalSend = { current: (_msg: Record<string, unknown>) => {} };
+
 const useStore = create<StoreState>((set, get) => ({
   sessions: [],
   currentSessionId: null,

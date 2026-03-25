@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home } from 'lucide-react';
 import { tildefy } from '../utils';
-import useStore from '../store';
+import useStore, { activeTerminalSend } from '../store';
 import SessionList from './SessionList';
 import LogsModal from './LogsModal';
 import ThemeDialog from './ThemeDialog';
@@ -174,7 +174,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
               ? <DropdownMenuItem disabled><span className="text-xs text-muted-foreground">No saved commands</span></DropdownMenuItem>
               : commands.map(c => (
                 <DropdownMenuItem key={c.id} onClick={() => {
-                  if (currentSessionId) send({ type: 'input', data: c.command + '\r' });
+                  activeTerminalSend.current({ type: 'input', data: c.command + '\r' });
                 }}>
                   <TerminalSquare size={13} />
                   <span className="truncate text-xs">{c.name}</span>

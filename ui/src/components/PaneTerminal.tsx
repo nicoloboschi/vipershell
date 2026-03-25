@@ -5,6 +5,7 @@ import GitDiffPane from './GitDiffPane';
 import FilesPane, { SearchPanel } from './FilesPane';
 import NotesPane from './NotesPane';
 import TerminalGrid from './TerminalGrid';
+import type { Layout } from './TerminalGrid';
 
 export const NOTES_SESSION_ID = '__notes__';
 
@@ -22,6 +23,8 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
   const openFileRef      = useRef<((path: string) => void) | null>(null);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
   const [highlightLine,  setHighlightLine]  = useState<number | null>(null);
+  const [gridLayout, setGridLayout] = useState<Layout>('single');
+  const changeLayoutRef = useRef<((l: Layout) => void) | null>(null);
 
   const LS_KEY      = 'vipershell:session-tabs';
   const LS_FILE_KEY = 'vipershell:session-last-file';
@@ -79,39 +82,30 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     if (last) setTimeout(() => openFileRef.current?.(last), 50);
   }, [activeTab, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sessionMap = useStore((s: any) => s.sessionMap);
+  const sessionMap = useStore(s => s.sessionMap);
 
-  // Create split: create a new session in the same directory
+  // Create split: create a new session in the same directory via REST API
   const handleCreateSplit = useCallback(async (): Promise<string | null> => {
     if (!sessionId) return null;
     const session = sessionMap[sessionId];
     const path = session?.path ?? null;
     try {
-      // Create via a temporary WebSocket and wait for session_created
-      return new Promise((resolve) => {
-        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${proto}//${location.host}/ws`);
-        ws.onopen = () => {
-          ws.send(JSON.stringify({ type: 'create_session', path }));
-        };
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'session_created') {
-              ws.close();
-              resolve(msg.session_id);
-            }
-            if (msg.type === 'sessions') {
-              useStore.getState().renderSessions(msg.sessions);
-            }
-          } catch { /* ignore */ }
-        };
-        ws.onerror = () => { ws.close(); resolve(null); };
-        // Timeout
-        setTimeout(() => { ws.close(); resolve(null); }, 5000);
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
       });
+      const data = await res.json();
+      if (data.ok && data.session_id) {
+        // Immediately register as split so it won't appear in session list
+        useStore.getState().addSplitSession(data.session_id);
+        // Refresh sessions list
+        send({ type: 'list_sessions' });
+        return data.session_id;
+      }
+      return null;
     } catch { return null; }
-  }, [sessionId, sessionMap]);
+  }, [sessionId, sessionMap, send]);
 
   const handleCloseSplit = useCallback((splitSessionId: string) => {
     send({ type: 'close_session', session_id: splitSessionId });
@@ -158,6 +152,8 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
         activeTab={activeTab}
         onTabChange={setActiveTab as (tab: string) => void}
         onConnect={onConnect}
+        layout={gridLayout}
+        onLayoutChange={(l) => changeLayoutRef.current?.(l)}
       />
       <div style={{ display: activeTab === 'terminal' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
         {sessionId && (
@@ -166,6 +162,10 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
             onCreateSplit={handleCreateSplit}
             onCloseSplit={handleCloseSplit}
             onFileLinkClick={handleFileLinkClick}
+            onLayoutReady={({ layout: l, changeLayout }) => {
+              setGridLayout(l);
+              changeLayoutRef.current = changeLayout;
+            }}
           />
         )}
       </div>

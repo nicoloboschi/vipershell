@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { X } from 'lucide-react';
-import useStore from '../store';
+import useStore, { activeTerminalSend } from '../store';
 
 const filterAltScreen = (data: string): string =>
   data.replace(/\x1b\[\?(1049|47|1047)[hl]/g, '');
@@ -210,9 +210,12 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onClose,
     return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
   }, []);
 
-  // Focus when active
+  // Focus when active + register as the target for mobile key bar
   useEffect(() => {
-    if (isActive) termRef.current?.focus();
+    if (isActive) {
+      termRef.current?.focus();
+      activeTerminalSend.current = (msg) => sendRef.current(msg);
+    }
   }, [isActive]);
 
   // Touch scroll

@@ -602,65 +602,41 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
       {cpuVal !== null && (
         <>
           {SEP}
-          <StatWidget label="CPU" value={cpuVal} unit="%" history={cpuH} color="#58a6ff" />
-          {SEP}
-          <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
-        </>
-      )}
-
-      {procCount !== null && (
-        <>
-          {SEP}
           <Popover>
             <PopoverTrigger asChild>
               <button
                 style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                  display: 'flex', alignItems: 'center', gap: 8,
                   background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
                   borderRadius: 4,
                 }}
                 className="hover:bg-white/5"
-                title="Show processes"
+                title="System stats"
               >
-                <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
-                  PROC
-                </span>
-                <span style={{ fontSize: 13, color: '#bc8cff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 700, lineHeight: 1 }}>
-                  {procCount}
-                </span>
+                <StatWidget label="CPU" value={cpuVal} unit="%" history={cpuH} color="#58a6ff" />
+                <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
               </button>
             </PopoverTrigger>
-            <PopoverContent side="bottom" align="end">
-              <ProcessList processes={processes} sessionId={sessionId} />
-            </PopoverContent>
-          </Popover>
-        </>
-      )}
-
-      {sessionUrls.length > 0 && (
-        <>
-          {SEP}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
-                  borderRadius: 4,
-                }}
-                className="hover:bg-white/5"
-                title="Show links"
-              >
-                <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
-                  LINKS
-                </span>
-                <span style={{ fontSize: 13, color: '#58a6ff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 700, lineHeight: 1 }}>
-                  {sessionUrls.length}
-                </span>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent side="bottom" align="end">
-              <UrlList urls={sessionUrls} />
+            <PopoverContent side="bottom" align="start">
+              <div style={{ minWidth: 300, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {/* Processes */}
+                {procCount !== null && procCount > 0 && (
+                  <ProcessList processes={processes} sessionId={sessionId} />
+                )}
+                {procCount !== null && procCount > 0 && sessionUrls.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--border)' }} />
+                )}
+                {/* Links */}
+                {sessionUrls.length > 0 && (
+                  <UrlList urls={sessionUrls} />
+                )}
+                {/* Empty state */}
+                {(procCount === null || procCount === 0) && sessionUrls.length === 0 && (
+                  <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--muted-foreground)', opacity: 0.6 }}>
+                    No processes or links
+                  </div>
+                )}
+              </div>
             </PopoverContent>
           </Popover>
         </>

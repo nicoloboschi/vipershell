@@ -1,5 +1,5 @@
 import type { Terminal } from 'xterm';
-import useStore from '../store';
+import useStore, { activeTerminalSend } from '../store';
 
 interface KeyDef {
   label: string;
@@ -40,13 +40,13 @@ interface MobileKeybarProps {
   termRef: React.MutableRefObject<Terminal | null>;
 }
 
-export default function MobileKeybar({ sendRef, termRef }: MobileKeybarProps) {
+export default function MobileKeybar({ termRef }: MobileKeybarProps) {
   const currentSessionId = useStore(s => s.currentSessionId);
 
   if (!currentSessionId) return null;
 
   function press(data: string) {
-    sendRef.current({ type: 'input', data });
+    activeTerminalSend.current({ type: 'input', data });
   }
 
   function scrollPage(direction: number) {
