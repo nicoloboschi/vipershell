@@ -278,9 +278,11 @@ export class TmuxBridge {
     return ms;
   }
 
-  async connectSession(sessionId: string): Promise<void> {
-    // Ensure PTY exists (will start streaming)
+  /** Returns true if PTY was newly created (first attach). */
+  async connectSession(sessionId: string): Promise<boolean> {
+    const existed = this.managed.has(sessionId);
     this.getOrCreatePty(sessionId);
+    return !existed;
   }
 
   sendInput(sessionId: string, data: string): void {
@@ -341,6 +343,7 @@ export class TmuxBridge {
 
     const dirArg = path ? `-c ${JSON.stringify(path)}` : `-c ${JSON.stringify(os.homedir())}`;
     await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg}`);
+    await execAsync(`tmux set-option -t ${JSON.stringify(name)} status off`);
     // Give tmux a moment to start
     await new Promise(r => setTimeout(r, 200));
     // Return the stable $N session ID, not the name

@@ -120,11 +120,11 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             state.unsubOutput?.();
             state.sessionId = sessionId;
 
-            // Ensure PTY is running before we subscribe
-            await bridge.connectSession(sessionId);
+            // 1. Take the snapshot FIRST (before PTY attach potentially
+            //    creates new output) — this is the authoritative screen state.
+            const snap = await bridge.snapshot(sessionId);
 
-            // Subscribe immediately to capture all output; buffer until
-            // the snapshot has been sent so the client sees it first.
+            // 2. Now subscribe to pubsub so we capture ALL new output.
             const pending: string[] = [];
             let draining = false;
             state.unsubOutput = bridge.pubsub.subscribe(sessionId, (m) => {
@@ -132,11 +132,23 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
               if (draining) { send(m); } else { pending.push(m.data); }
             });
 
-            const snap = await bridge.snapshot(sessionId);
+            // 3. Ensure PTY is running. If newly created, tmux attach
+            //    dumps the visible screen which duplicates the snapshot —
+            //    discard the pending buffer in that case.
+            const isNew = await bridge.connectSession(sessionId);
+
+            // 4. Send snapshot to client.
             send({ type: 'connected' });
             send({ type: 'output', data: snap });
 
-            // Flush any output that arrived while the snapshot was building
+            // 5. Flush buffered live output. If PTY was freshly attached,
+            //    the pending data is just the initial screen dump (already
+            //    covered by the snapshot) — skip it to avoid duplicates.
+            if (isNew) {
+              // Give the initial dump a moment to arrive, then discard
+              await new Promise(r => setTimeout(r, 100));
+              pending.length = 0;
+            }
             draining = true;
             for (const data of pending) {
               send({ type: 'output', data });

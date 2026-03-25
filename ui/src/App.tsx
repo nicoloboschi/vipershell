@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import useStore, { activeTerminalSend } from './store';
+import useStore, { activeTerminalSend, activeTerminalRefresh } from './store';
 import { requestNotificationPermission } from './utils';
 import { applyTheme } from './themes';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -19,7 +19,7 @@ import {
 } from './components/ui/dropdown-menu';
 import {
   Settings, ScrollText, Palette, ChevronDown, SquarePlus,
-  Home, Zap, TerminalSquare, BrainCircuit,
+  Home, Zap, TerminalSquare, BrainCircuit, RefreshCw,
 } from 'lucide-react';
 import { tildefy } from './utils';
 
@@ -230,6 +230,15 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
             )}
             <ChevronDown size={13} style={{ color: 'var(--muted-foreground)', flexShrink: 0 }} />
           </button>
+
+          <Button
+            variant="ghost" size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            title="Refresh terminal"
+            onClick={() => activeTerminalRefresh.current()}
+          >
+            <RefreshCw size={14} />
+          </Button>
 
           <DropdownMenu onOpenChange={(open) => { if (open) setCommands(loadCommands()); }}>
             <DropdownMenuTrigger asChild>

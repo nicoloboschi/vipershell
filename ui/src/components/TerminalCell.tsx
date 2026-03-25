@@ -41,10 +41,11 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
   // Create terminal once
   useEffect(() => {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
-      fontSize: 14,
+      fontSize: isMobile ? 11 : 14,
       lineHeight: 1.2,
       scrollback: 5000,
       theme: TERMINAL_THEME,
