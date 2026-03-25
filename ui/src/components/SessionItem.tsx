@@ -11,7 +11,7 @@ interface SessionItemProps {
 }
 
 export default function SessionItem({ session, isActive, onConnect }: SessionItemProps) {
-  const busy        = useStore(s => s.sessionBusy[session.id] ?? false);
+  const unseen      = useStore(s => s.sessionHasUnseen[session.id] ?? false);
   const lastEvent   = useStore(s => s.sessionLastEvent[session.id] ?? null);
   const lastCommand = useStore(s => s.sessionLastCommand[session.id] ?? null);
   const [, tick] = useState(0);
@@ -24,11 +24,11 @@ export default function SessionItem({ session, isActive, onConnect }: SessionIte
 
   return (
     <div
-      className={['session-item', isActive ? 'active' : '', busy ? 'busy' : ''].filter(Boolean).join(' ')}
+      className={['session-item', isActive ? 'active' : '', unseen ? 'unseen' : ''].filter(Boolean).join(' ')}
       data-session-id={session.id}
       onClick={() => onConnect(session.id)}
     >
-      <span className={`session-icon${busy ? ' session-icon-busy' : ''}`}>
+      <span className={`session-icon${unseen ? ' session-icon-unseen' : ''}`}>
         {session.isClaudeCode
           ? <ClaudeIcon size={12} />
           : <SquareTerminal size={12} />
@@ -36,7 +36,7 @@ export default function SessionItem({ session, isActive, onConnect }: SessionIte
       </span>
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span className="session-name-inline" style={{ flex: 1 }}>{session.name || '\u2014'}</span>
+          <span className={`session-name-inline${unseen && !isActive ? ' session-name-unseen' : ''}`} style={{ flex: 1 }}>{session.name || '\u2014'}</span>
           <span className="session-time">{time ?? ''}</span>
         </div>
         {lastCommand && (

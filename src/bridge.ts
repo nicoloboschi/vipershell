@@ -14,6 +14,21 @@ import os from 'os';
 const SCROLLBACK_DIR = join(homedir(), '.config', 'vipershell', 'scrollback');
 const execAsync = promisify(exec);
 
+/**
+ * Strip ANSI/terminal escape sequences from input data so they don't
+ * leak into the command buffer. Handles:
+ *  - CSI sequences:  ESC [ ... <letter>
+ *  - OSC sequences:  ESC ] ... (ST | BEL)  where ST = ESC \
+ *  - Other ESC seqs: ESC <char>
+ *  - DA responses:   ESC [ ? ... c  /  ESC [ > ... c
+ */
+function stripEscapeSequences(data: string): string {
+  return data.replace(
+    /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)?|\[[\x20-\x3f]*[\x40-\x7e]|.)/g,
+    ''
+  );
+}
+
 // Single-quote a shell argument — safe for tmux session IDs like "$3"
 function sh(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
@@ -267,8 +282,11 @@ export class TmuxBridge {
     const ms = this.managed.get(sessionId);
     if (ms) ms.pty.write(data);
 
-    // Track last command: accumulate printable chars, flush on Enter
-    for (const ch of data) {
+    // Track last command: accumulate printable chars, flush on Enter.
+    // Skip escape sequences (CSI, OSC, etc.) so terminal responses don't
+    // leak into the command buffer.
+    const stripped = stripEscapeSequences(data);
+    for (const ch of stripped) {
       if (ch === '\r' || ch === '\n') {
         const cmd = (this.inputBuffers.get(sessionId) ?? '').trim();
         this.inputBuffers.set(sessionId, '');

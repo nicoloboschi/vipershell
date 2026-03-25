@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus } from 'lucide-react';
-import useStore from '../store';
+import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, RefreshCw } from 'lucide-react';
+import useStore, { activeTerminalRefresh } from '../store';
 import StatChips from './StatChips';
 import ClaudeIcon from './ClaudeIcon';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
@@ -231,6 +231,16 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
         >
           {layoutButtons && <div>{layoutButtons}</div>}
           <div className="flex-1" />
+          {activeTab === 'terminal' && (
+            <button
+              title="Refresh terminal output"
+              onClick={() => activeTerminalRefresh.current()}
+              className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
           {tabBar && <div>{tabBar}</div>}
         </div>
       </div>

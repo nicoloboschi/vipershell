@@ -101,17 +101,6 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
       }
     }
 
-    function subscribeToSession(sessionId: string): void {
-      // Unsubscribe from previous session
-      state.unsubOutput?.();
-      state.sessionId = sessionId;
-
-      // Subscribe to live output
-      state.unsubOutput = bridge.pubsub.subscribe(sessionId, (msg) => {
-        if (msg.type === 'output') send(msg);
-      });
-    }
-
     ws.on('message', async (raw) => {
       let msg: Record<string, unknown>;
       try { msg = JSON.parse(raw.toString()); }
@@ -127,18 +116,30 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore) {
 
           case 'connect': {
             const sessionId = msg.session_id as string;
-            // Set session ID early so resize messages (sent by the client on
-            // 'connected') are processed while the snapshot is being built.
-            // We do NOT subscribe to output yet — that prevents live PTY output
-            // from racing the snapshot and arriving before it.
             state.unsubOutput?.();
             state.sessionId = sessionId;
-            send({ type: 'connected' });
-            const snap = await bridge.snapshot(sessionId);
-            send({ type: 'output', data: snap });
-            // Now subscribe to live output (snapshot already sent, no race)
-            subscribeToSession(sessionId);
+
+            // Ensure PTY is running before we subscribe
             await bridge.connectSession(sessionId);
+
+            // Subscribe immediately to capture all output; buffer until
+            // the snapshot has been sent so the client sees it first.
+            const pending: string[] = [];
+            let draining = false;
+            state.unsubOutput = bridge.pubsub.subscribe(sessionId, (m) => {
+              if (m.type !== 'output') return;
+              if (draining) { send(m); } else { pending.push(m.data); }
+            });
+
+            const snap = await bridge.snapshot(sessionId);
+            send({ type: 'connected' });
+            send({ type: 'output', data: snap });
+
+            // Flush any output that arrived while the snapshot was building
+            draining = true;
+            for (const data of pending) {
+              send({ type: 'output', data });
+            }
             break;
           }
 

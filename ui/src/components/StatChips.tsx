@@ -275,14 +275,14 @@ const GH_COMMIT_RE = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/commit\/([0-9a-
 
 function parseUrl(url: string): ParsedUrl {
   let m: RegExpMatchArray | null;
-  if ((m = url.match(GH_PR_RE)))     return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'PR' };
-  if ((m = url.match(GH_ISSUE_RE)))  return { favicon: 'https://github.com/favicon.ico', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'Issue' };
-  if ((m = url.match(GH_COMMIT_RE))) return { favicon: 'https://github.com/favicon.ico', badge: m[3] ?? null,    label: `${m[1]}/${m[2]}`, sublabel: 'Commit' };
+  if ((m = url.match(GH_PR_RE)))     return { favicon: 'https://www.google.com/s2/favicons?domain=github.com&sz=32', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'PR' };
+  if ((m = url.match(GH_ISSUE_RE)))  return { favicon: 'https://www.google.com/s2/favicons?domain=github.com&sz=32', badge: `#${m[3]}`,    label: `${m[1]}/${m[2]}`, sublabel: 'Issue' };
+  if ((m = url.match(GH_COMMIT_RE))) return { favicon: 'https://www.google.com/s2/favicons?domain=github.com&sz=32', badge: m[3] ?? null,    label: `${m[1]}/${m[2]}`, sublabel: 'Commit' };
   try {
     const u = new URL(url);
     const path = u.pathname.replace(/\/$/, '');
     return {
-      favicon: `${u.origin}/favicon.ico`,
+      favicon: `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=32`,
       badge: null,
       label: u.hostname + (path.length > 28 ? path.slice(0, 26) + '\u2026' : path),
       sublabel: null,
@@ -378,12 +378,12 @@ interface GitDetailsProps {
   github: GithubPR | null;
   sessionId: string;
   send: (msg: Record<string, unknown>) => void;
+  prUrls?: { num: number; url: string }[];
 }
 
-function GitDetails({ git, github, sessionId, send }: GitDetailsProps): React.ReactElement {
+function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsProps): React.ReactElement {
   const Icon = git.detached ? GitCommitHorizontal : GitBranch;
   const branchColor: string = git.dirty ? '#d29922' : '#3fb950';
-  const prNumber: string | undefined = github?.prUrl?.match(/\/pull\/(\d+)/)?.[1];
   const [worktrees, refreshWorktrees] = useWorktrees(sessionId);
   const [wtLoading, setWtLoading] = useState<boolean>(false);
   const [wtError, setWtError] = useState<string | null>(null);
@@ -404,6 +404,13 @@ function GitDetails({ git, github, sessionId, send }: GitDetailsProps): React.Re
     }
   }
 
+  // Build the list of PRs to show: from sessionUrls first, fall back to github hook
+  const allPrs = prUrls.length > 0
+    ? prUrls
+    : github?.prUrl
+      ? [{ num: parseInt(github.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? '0', 10), url: github.prUrl }].filter(p => p.num > 0)
+      : [];
+
   return (
     <div style={{ minWidth: 240, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -414,21 +421,53 @@ function GitDetails({ git, github, sessionId, send }: GitDetailsProps): React.Re
         {git.detached && (
           <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.6 }}>detached</span>
         )}
-        {github && (
+        {github?.repoUrl && allPrs.length === 0 && (
           <a
-            href={github.prUrl ?? github.repoUrl}
+            href={github.repoUrl}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e: React.MouseEvent<HTMLElement>) => e.stopPropagation()}
-            title={prNumber ? `Open PR #${prNumber} on GitHub` : 'Open repository on GitHub'}
+            title="Open repository on GitHub"
             style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', color: 'var(--muted-foreground)', textDecoration: 'none', fontSize: 11, flexShrink: 0 }}
             className="hover:text-foreground"
           >
             <Github size={12} />
-            {prNumber && <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>#{prNumber}</span>}
           </a>
         )}
       </div>
+      {/* Pull Requests */}
+      {allPrs.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {allPrs.map(pr => {
+            const m = pr.url.match(GH_PR_RE);
+            const repo = m ? `${m[1]}/${m[2]}` : '';
+            return (
+              <a
+                key={pr.url}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e: React.MouseEvent<HTMLElement>) => e.stopPropagation()}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  textDecoration: 'none', padding: '3px 4px', borderRadius: 4,
+                }}
+                className="hover:bg-white/5"
+              >
+                <Github size={11} style={{ color: '#79c0ff', flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#79c0ff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+                  #{pr.num}
+                </span>
+                {repo && (
+                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {repo}
+                  </span>
+                )}
+              </a>
+            );
+          })}
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--muted-foreground)' }}>
         <Row label="Status" value={git.dirty ? 'Uncommitted changes' : 'Clean'} color={git.dirty ? '#d29922' : '#3fb950'} />
         {git.ahead > 0  && <Row label="Ahead"  value={`${git.ahead} commit${git.ahead  > 1 ? 's' : ''}`} color="#58a6ff" />}
@@ -509,13 +548,29 @@ interface GitChipProps {
   send: (msg: Record<string, unknown>) => void;
 }
 
+function extractPrUrls(urls: string[]): { num: number; url: string }[] {
+  const prs: { num: number; url: string }[] = [];
+  for (const url of urls) {
+    const m = url.match(GH_PR_RE);
+    if (m) prs.push({ num: parseInt(m[3]!, 10), url });
+  }
+  // Sort descending by PR number (highest first)
+  prs.sort((a, b) => b.num - a.num);
+  return prs;
+}
+
 function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
   const git = useGit(sessionId) as GitStatus | null;
   const github = useGithubPR(sessionId) as GithubPR | null;
+  const sessionUrls = useStore((s: any) => s.sessionUrls?.[sessionId] ?? EMPTY_URLS) as string[];
   if (!git) return null;
 
   const branchColor: string = git.dirty ? '#d29922' : '#3fb950';
-  const prNumber: string | undefined = github?.prUrl?.match(/\/pull\/(\d+)/)?.[1];
+  // Collect PRs from session URLs (highest number first)
+  const prUrls = extractPrUrls(sessionUrls);
+  // Fall back to the github hook PR if no PR URLs detected in terminal output
+  const topPr = prUrls[0] ?? (github?.prUrl ? { num: parseInt(github.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? '0', 10), url: github.prUrl } : null);
+  const extraCount = Math.max(0, prUrls.length - 1);
 
   return (
     <>
@@ -542,16 +597,19 @@ function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
               {git.dirty && <span style={{ fontSize: 8, color: '#d29922', fontWeight: 700 }}>{'\u25CF'}</span>}
               {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#58a6ff' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
               {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#ff7b72' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
-              {prNumber && (
+              {topPr && topPr.num > 0 && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: '#79c0ff' }}>
-                  <Github size={8} strokeWidth={2} />#{prNumber}
+                  <Github size={8} strokeWidth={2} />#{topPr.num}
+                  {extraCount > 0 && (
+                    <span style={{ fontSize: 8, color: '#79c0ff', opacity: 0.7 }}>+{extraCount}</span>
+                  )}
                 </span>
               )}
             </span>
           </button>
         </PopoverTrigger>
         <PopoverContent side="bottom" align="end">
-          <GitDetails git={git} github={github} sessionId={sessionId} send={send} />
+          <GitDetails git={git} github={github} sessionId={sessionId} send={send} prUrls={prUrls} />
         </PopoverContent>
       </Popover>
     </>

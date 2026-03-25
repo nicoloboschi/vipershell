@@ -791,6 +791,36 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     return res.json({ ok: true, steps, hindsightUrl });
   });
 
+  router.post('/memory/claude-code-disable', async (_req, res) => {
+    try {
+      await execAsync('claude plugin disable hindsight-memory', { timeout: 10_000 });
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const err = e as { stderr?: string; message?: string };
+      res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+    }
+  });
+
+  router.post('/memory/claude-code-enable', async (_req, res) => {
+    try {
+      await execAsync('claude plugin enable hindsight-memory', { timeout: 10_000 });
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const err = e as { stderr?: string; message?: string };
+      res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+    }
+  });
+
+  router.post('/memory/claude-code-remove', async (_req, res) => {
+    try {
+      await execAsync('claude plugin uninstall hindsight-memory', { timeout: 10_000 });
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const err = e as { stderr?: string; message?: string };
+      res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+    }
+  });
+
   router.post('/memory/ui', async (req, res) => {
     if (!memory.active) return res.json({ active: false, url: null });
 

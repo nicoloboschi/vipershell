@@ -3,6 +3,21 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import CodeMirror from '@uiw/react-codemirror';
+import { vscodeDark } from '@uiw/codemirror-theme-vscode';
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { css } from '@codemirror/lang-css';
+import { html } from '@codemirror/lang-html';
+import { json } from '@codemirror/lang-json';
+import { markdown } from '@codemirror/lang-markdown';
+import { rust } from '@codemirror/lang-rust';
+import { java } from '@codemirror/lang-java';
+import { cpp } from '@codemirror/lang-cpp';
+import { sql } from '@codemirror/lang-sql';
+import { yaml } from '@codemirror/lang-yaml';
+import { php } from '@codemirror/lang-php';
+import type { Extension } from '@codemirror/state';
 import {
   Folder, FolderOpen, ChevronLeft, FileCode, FileText, Image,
   FileJson, Film, Music, Archive, File, RefreshCw, Save, Eye, Pencil, Copy, Check,
@@ -72,6 +87,28 @@ const EXT_LANG: Record<string, string> = {
   proto: 'protobuf', tf: 'hcl',
 };
 const getLang = (name: string) => EXT_LANG[ext(name)] ?? 'text';
+
+function getCmLang(name: string): Extension[] {
+  const lang = getLang(name);
+  switch (lang) {
+    case 'javascript': return [javascript()];
+    case 'jsx':        return [javascript({ jsx: true })];
+    case 'typescript': return [javascript({ typescript: true })];
+    case 'tsx':        return [javascript({ jsx: true, typescript: true })];
+    case 'python':     return [python()];
+    case 'css': case 'scss': case 'less': return [css()];
+    case 'html': case 'xml': return [html()];
+    case 'json':       return [json()];
+    case 'markdown':   return [markdown()];
+    case 'rust':       return [rust()];
+    case 'java':       return [java()];
+    case 'cpp': case 'c': return [cpp()];
+    case 'sql':        return [sql()];
+    case 'yaml':       return [yaml()];
+    case 'php':        return [php()];
+    default:           return [];
+  }
+}
 const isImage = (name: string): boolean => ['png','jpg','jpeg','gif','webp','svg','ico','bmp'].includes(ext(name));
 const isPdf   = (name: string): boolean => ext(name) === 'pdf';
 const isMd    = (name: string): boolean => ['md','markdown','mdx'].includes(ext(name));
@@ -163,7 +200,6 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
   const [saveMsg,   setSaveMsg]   = useState<string | null>(null);
   const [copied,    setCopied]    = useState(false);
   const [copiedContent, setCopiedContent] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLTableRowElement>(null);
 
   const isDirty = content !== original;
@@ -299,7 +335,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
             ]).map(({ id, icon, label }) => (
               <button
                 key={id}
-                onClick={() => { setMode(id); if (id === 'edit') setTimeout(() => textareaRef.current?.focus(), 0); }}
+                onClick={() => setMode(id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   fontSize: 11, padding: '2px 8px',
@@ -352,19 +388,17 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
           )}
 
           {textFile && mode === 'edit' && (
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              onKeyDown={e => { if (e.key === 's' && e.metaKey) { e.preventDefault(); if (isDirty) save(); } }}
-              spellCheck={false}
-              style={{
-                flex: 1, minHeight: 0, resize: 'none', border: 'none', outline: 'none',
-                background: '#0d1117', color: '#c9d1d9', padding: '12px 16px',
-                fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace',
-                fontSize: 13, lineHeight: 1.6, tabSize: 2,
-              }}
-            />
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+              <CodeMirror
+                value={content}
+                extensions={getCmLang(path)}
+                theme={vscodeDark}
+                onChange={setContent}
+                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 's' && e.metaKey) { e.preventDefault(); if (isDirty) save(); } }}
+                basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, tabSize: 2, searchKeymap: false }}
+                style={{ fontSize: 13, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace', minHeight: '100%' }}
+              />
+            </div>
           )}
 
           {textFile && mode === 'preview' && !mdFile && (
@@ -838,7 +872,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 11, color: '#6e7681', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {showBack
             ? (selectedFile?.split('/').pop() ?? '')
-            : `~${breadcrumbs.length > 0 ? '/' + breadcrumbs.join('/') : ''}`}
+            : `${cwd?.split('/').pop() ?? '~'}${breadcrumbs.length > 0 ? '/' + breadcrumbs.join('/') : ''}`}
         </span>
         {!showBack && cwd && dir !== cwd && (
           <button onClick={() => browse(cwd)} title="Go to project root" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#484f58', padding: 0, flexShrink: 0 }}>

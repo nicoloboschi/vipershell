@@ -2,10 +2,17 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import useStore, { activeTerminalSend } from '../store';
+import useStore, { activeTerminalSend, activeTerminalRefresh } from '../store';
 
 const filterAltScreen = (data: string): string =>
-  data.replace(/\x1b\[\?(1049|47|1047)[hl]/g, '');
+  data
+    .replace(/\x1b\[\?(1049|47|1047)[hl]/g, '')   // strip alt-screen enter/exit
+    .replace(/\x1b\[3J/g, '')                       // strip clear-scrollback (CSI 3 J)
+    .replace(/\x1bc/g, '');                          // strip hard reset (RIS)
+
+// Match URLs: scheme + domain + optional path/query/fragment (stop at whitespace, quotes, parens, angles, control chars)
+const URL_RE = /https?:\/\/[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9](?::\d+)?(?:\/[^\s"'<>()\x1b\x07\u0007\]{}|\\^`]*)?/g;
+const stripAnsi = (s: string) => s.replace(/\x1b(?:\[[0-9;]*[a-zA-Z]|\].*?(?:\x07|\x1b\\))/g, '');
 
 const TERMINAL_THEME = {
   background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', cursorAccent: '#0d1117',
@@ -62,11 +69,13 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       sendRef.current({ type: 'input', data });
     });
 
-    // Bell
+    // Bell — notify user when a background session rings (e.g. Claude Code finished)
     const bellDispose = term.onBell(() => {
       const state = useStore.getState();
-      const session = state.currentSessionId ? state.sessionMap[state.currentSessionId] : undefined;
-      import('../utils').then(({ notify }) => notify('vipershell \u{1F40D}', `Bell in ${session?.name ?? 'terminal'}`));
+      const session = state.sessionMap[sessionId];
+      const name = session?.name ?? 'terminal';
+      state.markUnseen(sessionId);
+      import('../utils').then(({ notify }) => notify('vipershell \u{1F40D}', `${name} needs attention`));
     });
 
     return () => {
@@ -153,7 +162,20 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             pendingResetRef.current = false;
             term.reset();
           }
-          term.write(filterAltScreen(msg.data));
+          const filtered = filterAltScreen(msg.data);
+          term.write(filtered);
+          // Mark unseen if this session is not currently active
+          useStore.getState().markUnseen(sessionId);
+          // Extract URLs from output and store them
+          const plain = stripAnsi(filtered);
+          const urls = plain.match(URL_RE);
+          if (urls) {
+            const store = useStore.getState();
+            for (const url of urls) {
+              const clean = url.replace(/[.,;:!?)'"}\]]+$/, '');
+              store.addSessionUrl(sessionId, clean);
+            }
+          }
         }
       };
 
@@ -213,6 +235,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     if (isActive) {
       termRef.current?.focus();
       activeTerminalSend.current = (msg) => sendRef.current(msg);
+      activeTerminalRefresh.current = () => sendRef.current({ type: 'connect', session_id: sessionId });
     }
   }, [isActive]);
 
@@ -221,35 +244,41 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     const el = containerRef.current;
     if (!el) return;
     let lastTouchY = 0, accPx = 0, isTouchScrolling = false;
-    const getVp = (): HTMLElement | null => el.querySelector('.xterm-viewport') as HTMLElement | null;
 
     const onTouchStart = (e: TouchEvent): void => {
       lastTouchY = e.touches[0]!.clientY;
       accPx = 0; isTouchScrolling = false;
     };
     const onTouchMove = (e: TouchEvent): void => {
+      const term = termRef.current;
+      if (!term) return;
       const dy = lastTouchY - e.touches[0]!.clientY;
       lastTouchY = e.touches[0]!.clientY;
       accPx += dy;
-      const px = Math.trunc(accPx); accPx -= px;
-      if (px !== 0) {
-        const vp = getVp();
-        if (vp) { vp.scrollTop = Math.max(0, Math.min(vp.scrollTop + px, vp.scrollHeight - vp.clientHeight)); isTouchScrolling = true; }
+      const lineH = (term.options?.fontSize ?? 14) * (term.options?.lineHeight ?? 1.2);
+      const lines = Math.trunc(accPx / lineH);
+      if (lines !== 0) {
+        accPx -= lines * lineH;
+        term.scrollLines(lines);
+        isTouchScrolling = true;
       }
       if (isTouchScrolling) { e.preventDefault(); e.stopPropagation(); }
     };
     const onTouchEnd = (): void => { isTouchScrolling = false; };
     const onWheel = (e: WheelEvent): void => {
-      if (termRef.current?.buffer?.active?.type === 'alternate') return;
+      const term = termRef.current;
+      if (!term || term.buffer?.active?.type === 'alternate') return;
       e.preventDefault(); e.stopPropagation();
-      const vp = getVp();
-      if (!vp) return;
-      const deltaPx = e.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? e.deltaY * ((termRef.current?.options?.fontSize ?? 14) * (termRef.current?.options?.lineHeight ?? 1.2))
-        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? e.deltaY * (termRef.current?.rows ?? 20) * ((termRef.current?.options?.fontSize ?? 14) * (termRef.current?.options?.lineHeight ?? 1.2))
-          : e.deltaY;
-      vp.scrollTop = Math.max(0, Math.min(vp.scrollTop + deltaPx, vp.scrollHeight - vp.clientHeight));
+      const lineH = (term.options?.fontSize ?? 14) * (term.options?.lineHeight ?? 1.2);
+      let lines: number;
+      if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        lines = Math.round(e.deltaY);
+      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        lines = Math.round(e.deltaY * (term.rows ?? 20));
+      } else {
+        lines = Math.round(e.deltaY / lineH);
+      }
+      if (lines !== 0) term.scrollLines(lines);
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });

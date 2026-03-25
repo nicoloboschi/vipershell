@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { notify } from './utils';
 import { applyTheme, DEFAULT_THEME } from './themes';
 
 export interface Session {
@@ -23,6 +22,8 @@ export interface StoreState {
   currentSessionId: string | null;
   sessionPreviews: Record<string, string>;
   sessionBusy: Record<string, boolean>;
+  /** Sessions with unseen output (cleared when you switch to them) */
+  sessionHasUnseen: Record<string, boolean>;
   sessionLastEvent: Record<string, number>;
   sessionOrder: string[];
   sessionMap: Record<string, Session>;
@@ -50,6 +51,8 @@ export interface StoreState {
   clearSessionUrls: (sessionId: string) => void;
   setLastCommand: (sessionId: string, command: string) => void;
   setCurrentInput: (sessionId: string, input: string) => void;
+  markUnseen: (sessionId: string) => void;
+  clearUnseen: (sessionId: string) => void;
   addSplitSession: (sessionId: string) => void;
   removeSplitSession: (sessionId: string) => void;
   navigateSession: (direction: 'up' | 'down') => string | null;
@@ -58,8 +61,9 @@ export interface StoreState {
 // Debounce timers kept outside store state (no re-renders on timer changes)
 const _busyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-// Active terminal send — updated by TerminalCell when it becomes active
-export const activeTerminalSend = { current: (_msg: Record<string, unknown>) => {} };
+// Active terminal send/refresh — updated by TerminalCell when it becomes active
+export const activeTerminalSend    = { current: (_msg: Record<string, unknown>) => {} };
+export const activeTerminalRefresh = { current: () => {} };
 
 // Pre-load split session IDs from localStorage so they're hidden before first render
 function loadSplitSessionIds(): Set<string> {
@@ -82,6 +86,7 @@ const useStore = create<StoreState>((set, get) => ({
   currentSessionId: null,
   sessionPreviews: {},
   sessionBusy: {},
+  sessionHasUnseen: {},
   sessionLastEvent: {},
   sessionOrder: [],
   sessionMap: {},
@@ -126,8 +131,11 @@ const useStore = create<StoreState>((set, get) => ({
     }
     const sessionOrder = Object.values(byPath).flat().map(s => s.id);
 
+    const VIRTUAL_IDS = new Set(['__notes__']);
     const nextCurrentId =
-      currentSessionId && sessionMap[currentSessionId] ? currentSessionId : null;
+      currentSessionId && (sessionMap[currentSessionId] || VIRTUAL_IDS.has(currentSessionId))
+        ? currentSessionId
+        : null;
 
     const nextLastEvent = { ...get().sessionLastEvent };
     for (const s of sorted) {
@@ -149,7 +157,16 @@ const useStore = create<StoreState>((set, get) => ({
   },
 
   setCurrentSessionId(id: string | null) {
-    if (id) localStorage.setItem('vipershell-last-session', id);
+    if (id) {
+      localStorage.setItem('vipershell-last-session', id);
+      // Clear unseen indicator when switching to this session
+      const { sessionHasUnseen } = get();
+      if (sessionHasUnseen[id]) {
+        const next = { ...sessionHasUnseen };
+        delete next[id];
+        set({ sessionHasUnseen: next });
+      }
+    }
     set({ currentSessionId: id });
   },
 
@@ -164,7 +181,14 @@ const useStore = create<StoreState>((set, get) => ({
   },
 
   updatePreview(sessionId: string, preview: string, busy?: boolean) {
+    const { sessionPreviews, currentSessionId } = get();
+    const prevPreview = sessionPreviews[sessionId];
     set(s => ({ sessionPreviews: { ...s.sessionPreviews, [sessionId]: preview } }));
+
+    // Mark unseen if preview changed for a non-active session (skip first load when no prev exists)
+    if (prevPreview !== undefined && preview !== prevPreview && sessionId !== currentSessionId) {
+      set(s => ({ sessionHasUnseen: { ...s.sessionHasUnseen, [sessionId]: true } }));
+    }
 
     if (busy === true) {
       if (_busyTimers.has(sessionId)) return;
@@ -178,12 +202,6 @@ const useStore = create<StoreState>((set, get) => ({
         clearTimeout(pending);
         _busyTimers.delete(sessionId);
         return;
-      }
-      const { sessionBusy, sessionMap } = get();
-      const wasBusy = sessionBusy[sessionId] ?? false;
-      if (wasBusy) {
-        const name = sessionMap[sessionId]?.name ?? 'terminal';
-        notify('vipershell \u{1F40D}', `${name} finished`);
       }
       set(s => ({ sessionBusy: { ...s.sessionBusy, [sessionId]: false } }));
     }
@@ -223,6 +241,20 @@ const useStore = create<StoreState>((set, get) => ({
 
   setCurrentInput(sessionId: string, input: string) {
     set(s => ({ sessionCurrentInput: { ...s.sessionCurrentInput, [sessionId]: input } }));
+  },
+
+  markUnseen(sessionId: string) {
+    const { currentSessionId } = get();
+    if (sessionId === currentSessionId) return; // user is watching this session
+    set(s => ({ sessionHasUnseen: { ...s.sessionHasUnseen, [sessionId]: true } }));
+  },
+
+  clearUnseen(sessionId: string) {
+    set(s => {
+      const next = { ...s.sessionHasUnseen };
+      delete next[sessionId];
+      return { sessionHasUnseen: next };
+    });
   },
 
   addSplitSession(sessionId: string) {

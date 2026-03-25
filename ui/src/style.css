@@ -146,29 +146,21 @@
 
 .session-item {
   position: relative;
-  display: flex; align-items: flex-start; gap: 5px; padding: 4px 6px 4px 20px;
+  display: flex; align-items: center; gap: 5px; padding: 4px 6px 4px 20px;
   cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s;
   min-width: 0;
 }
 .session-item:hover  { background: var(--accent); }
 .session-item.active { background: var(--session-active-bg); border-left-color: var(--ring); }
 
-@keyframes pulse-busy {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
-}
-
 .session-icon {
   display: flex; align-items: center; flex-shrink: 0;
   color: var(--muted-foreground); opacity: 0.4; transition: opacity 0.3s;
 }
-.session-icon-busy {
-  opacity: 1; color: var(--warning);
-  animation: pulse-busy 1.2s ease-in-out infinite;
-}
-.session-icon { margin-top: 1px; }
 .session-item.active .session-icon { opacity: 0.7; }
-.session-item.active .session-icon-busy { opacity: 1; }
+.session-item.unseen .session-icon { opacity: 1; color: #58a6ff; }
+
+.session-name-unseen { color: #58a6ff !important; opacity: 1 !important; }
 
 .session-name-inline {
   font-size: 11px; color: var(--foreground); opacity: 0.8;
