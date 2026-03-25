@@ -596,10 +596,13 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
   const processes: StatsProcess[] | null = stats?.processes ?? null;
   const procCount: number | null = processes?.length ?? null;
 
+  const hasStats = cpuVal !== null;
+  const hasExtra = (procCount !== null && procCount > 0) || sessionUrls.length > 0;
+
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       <GitChip sessionId={sessionId} send={send} />
-      {cpuVal !== null && (
+      {(hasStats || hasExtra) && (
         <>
           {SEP}
           <Popover>
@@ -613,8 +616,21 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
                 className="hover:bg-white/5"
                 title="System stats"
               >
-                <StatWidget label="CPU" value={cpuVal} unit="%" history={cpuH} color="#58a6ff" />
-                <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
+                {hasStats && (
+                  <>
+                    <StatWidget label="CPU" value={cpuVal!} unit="%" history={cpuH} color="#58a6ff" />
+                    <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
+                  </>
+                )}
+                {sessionUrls.length > 0 && (
+                  <span style={{
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    fontSize: 10, color: '#58a6ff',
+                    fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 600,
+                  }}>
+                    {sessionUrls.length} link{sessionUrls.length !== 1 ? 's' : ''}
+                  </span>
+                )}
               </button>
             </PopoverTrigger>
             <PopoverContent side="bottom" align="start">
@@ -630,8 +646,8 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
                 {sessionUrls.length > 0 && (
                   <UrlList urls={sessionUrls} />
                 )}
-                {/* Empty state */}
-                {(procCount === null || procCount === 0) && sessionUrls.length === 0 && (
+                {/* Empty state — only if stats exist but no extras */}
+                {hasStats && !hasExtra && (
                   <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--muted-foreground)', opacity: 0.6 }}>
                     No processes or links
                   </div>

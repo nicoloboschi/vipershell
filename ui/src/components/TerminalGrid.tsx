@@ -17,7 +17,9 @@ const LS_KEY = 'vipershell:term-grid';
 function loadGridState(sessionId: string): { layout: Layout; cells: string[] } | null {
   try {
     const map = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    return map[sessionId] ?? null;
+    const saved = map[sessionId];
+    if (saved && saved.cells?.length > 0 && saved.cells[0] === sessionId) return saved;
+    return null;
   } catch { return null; }
 }
 
@@ -38,7 +40,6 @@ function layoutCellCount(layout: Layout): number {
   }
 }
 
-/** CSS grid template for each layout. Cells are always in order: 0,1,2,3. */
 function gridStyle(layout: Layout): React.CSSProperties {
   switch (layout) {
     case 'single':
@@ -53,17 +54,24 @@ function gridStyle(layout: Layout): React.CSSProperties {
 }
 
 export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
-  const [layout, setLayout] = useState<Layout>('single');
-  const [cells, setCells] = useState<(string | null)[]>([sessionId]);
+  // Initialize from localStorage synchronously to avoid overwrite race
+  const [layout, setLayout] = useState<Layout>(() => {
+    return loadGridState(sessionId)?.layout ?? 'single';
+  });
+  const [cells, setCells] = useState<(string | null)[]>(() => {
+    return loadGridState(sessionId)?.cells ?? [sessionId];
+  });
   const [activeCell, setActiveCell] = useState(0);
   const creatingRef = useRef(false);
+  const initializedRef = useRef(false);
 
-  // Restore saved state when session changes
+  // Register split sessions on mount and when session changes
   useEffect(() => {
     const saved = loadGridState(sessionId);
-    if (saved && saved.cells.length > 0 && saved.cells[0] === sessionId) {
+    if (saved) {
       setLayout(saved.layout);
       setCells(saved.cells);
+      // Register all split sessions so they're hidden from sidebar
       for (let i = 1; i < saved.cells.length; i++) {
         if (saved.cells[i]) useStore.getState().addSplitSession(saved.cells[i]!);
       }
@@ -72,8 +80,10 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
       setCells([sessionId]);
     }
     setActiveCell(0);
+    initializedRef.current = true;
 
     return () => {
+      // Unregister splits when switching away
       const stored = loadGridState(sessionId);
       if (stored) {
         for (let i = 1; i < stored.cells.length; i++) {
@@ -83,8 +93,9 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
     };
   }, [sessionId]);
 
-  // Persist grid state whenever cells are fully resolved
+  // Persist grid state — but only after initial restore
   useEffect(() => {
+    if (!initializedRef.current) return;
     if (cells.every(c => c !== null)) {
       saveGridState(sessionId, layout, cells as string[]);
     }

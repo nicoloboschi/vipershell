@@ -61,6 +61,22 @@ const _busyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Active terminal send — updated by TerminalCell when it becomes active
 export const activeTerminalSend = { current: (_msg: Record<string, unknown>) => {} };
 
+// Pre-load split session IDs from localStorage so they're hidden before first render
+function loadSplitSessionIds(): Set<string> {
+  const ids = new Set<string>();
+  try {
+    const map = JSON.parse(localStorage.getItem('vipershell:term-grid') || '{}');
+    for (const state of Object.values(map) as { cells?: string[] }[]) {
+      if (state?.cells) {
+        for (let i = 1; i < state.cells.length; i++) {
+          if (state.cells[i]) ids.add(state.cells[i]!);
+        }
+      }
+    }
+  } catch { /* ignore */ }
+  return ids;
+}
+
 const useStore = create<StoreState>((set, get) => ({
   sessions: [],
   currentSessionId: null,
@@ -73,7 +89,7 @@ const useStore = create<StoreState>((set, get) => ({
   sessionLastCommand: {},
   sessionCurrentInput: {},
   openPaneMap: {},
-  splitSessionIds: new Set<string>(),
+  splitSessionIds: loadSplitSessionIds(),
   wsStatus: 'connecting',
   sheetOpen: false,
   confirm: null,
