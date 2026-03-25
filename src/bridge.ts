@@ -138,14 +138,15 @@ export class TmuxBridge {
   async listSessions(): Promise<Session[]> {
     try {
       const { stdout } = await execAsync(
-        'tmux list-sessions -F "#{session_id}|#{session_name}|#{session_activity}" 2>/dev/null'
+        'tmux list-sessions -F "#{session_id}|#{session_name}|#{session_activity}|#{automatic-rename}" 2>/dev/null'
       );
       const lines = stdout.trim().split('\n').filter(Boolean);
       const sessions: Session[] = [];
 
       for (const line of lines) {
-        const [id, name, activityStr] = line.split('|');
+        const [id, name, activityStr, autoRenameStr] = line.split('|');
         if (!id || !name) continue;
+        const autoRenameOff = autoRenameStr === '0';
         try {
           const { stdout: info } = await execAsync(
             `tmux display-message -t ${sh(id)} -p "#{pane_current_path}|#{session_activity}|#{pane_pid}|#{pane_title}" 2>/dev/null`
@@ -185,9 +186,13 @@ export class TmuxBridge {
               isClaudeCode = childCmds.split('\n').some(c => /\bclaude\b/i.test(c.trim()));
             } catch { /* ignore */ }
           }
-          const displayName = (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
-            ? paneTitle.trim()
-            : name;
+          // If automatic-rename is off, we (or the user) set the session name explicitly — use it.
+          // Otherwise fall back to pane_title (e.g. Claude Code task description) or session name.
+          const displayName = autoRenameOff
+            ? name
+            : (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
+              ? paneTitle.trim()
+              : name;
           sessions.push({
             id,
             name: displayName,
