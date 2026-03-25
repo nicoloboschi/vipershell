@@ -15,6 +15,7 @@ export default defineConfig({
   server: {
     port: 4444,
     host: '0.0.0.0',
+    allowedHosts: true,
     proxy: {
       '/api': 'http://localhost:4445',
       '/ws': {
