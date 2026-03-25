@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { BrainCircuit, ExternalLink, Check, Loader, RotateCw, Copy, Power, PowerOff, Trash2 } from 'lucide-react';
+import { BrainCircuit, ExternalLink, Check, Loader, RotateCw, Copy, Power, PowerOff, Trash2, ArrowUpCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import ClaudeIcon from './ClaudeIcon';
@@ -368,7 +368,10 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                     Claude Code has long-term memory powered by vipershell&apos;s Hindsight.
                   </p>
                   {actionState === 'error' && <p className="text-xs text-destructive break-words">{actionError}</p>}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-update')} disabled={actionState === 'loading'}>
+                      {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />} Update
+                    </Button>
                     {ccStatus.pluginEnabled ? (
                       <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-disable')} disabled={actionState === 'loading'}>
                         {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <PowerOff size={13} />} Disable

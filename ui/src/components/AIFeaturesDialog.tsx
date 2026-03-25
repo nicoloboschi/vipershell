@@ -9,7 +9,6 @@ interface AIConfig {
   aiEnabled: boolean;
   aiProvider: AIProvider;
   autoNaming: boolean;
-  autoNamingIntervalSecs: number;
 }
 
 type AsyncState = 'idle' | 'loading' | 'ok' | 'error';
@@ -40,12 +39,12 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cfg),
       });
-      const { ok, error } = await res.json();
-      if (!ok) { setSaveState('error'); setSaveError(error || 'Save failed'); return; }
+      const data = await res.json();
+      if (!data.ok) { setSaveState('error'); setSaveError(data.error || 'Save failed'); return; }
       setSaveState('ok');
       setTimeout(() => setSaveState('idle'), 2000);
-    } catch {
-      setSaveState('error'); setSaveError('Request failed');
+    } catch (e) {
+      setSaveState('error'); setSaveError(`Request failed: ${e}`);
     }
   }
 
@@ -118,21 +117,6 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
                       />
                       <span className="text-xs font-medium text-foreground">Enable auto-naming</span>
                     </label>
-
-                    {cfg.autoNaming && (
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-muted-foreground">Check every</label>
-                        <input
-                          type="number"
-                          min={10}
-                          max={300}
-                          value={cfg.autoNamingIntervalSecs}
-                          onChange={e => setCfg({ ...cfg, autoNamingIntervalSecs: parseInt(e.target.value) || 30 })}
-                          className="text-xs px-2 py-1 rounded border border-border bg-background text-foreground w-16 text-center"
-                        />
-                        <span className="text-xs text-muted-foreground">seconds</span>
-                      </div>
-                    )}
                   </div>
                 </>
               )}

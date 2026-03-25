@@ -870,6 +870,23 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       errors.push(`Config: ${String(e)}`);
     }
 
+    // Step 4: Run setup_hooks.py to register hooks
+    if (errors.length === 0) {
+      try {
+        const cacheDir = nodePath.join(os.homedir(), '.claude', 'plugins', 'cache', 'hindsight', 'hindsight-memory');
+        const versions = readdirSync(cacheDir).sort().reverse();
+        if (versions.length > 0) {
+          const setupScript = nodePath.join(cacheDir, versions[0]!, 'scripts', 'setup_hooks.py');
+          if (existsSync(setupScript)) {
+            await execAsync(`python3 "${setupScript}"`, { timeout: 15_000 });
+            steps.push('hooks');
+          }
+        }
+      } catch (e) {
+        errors.push(`Hooks: ${String(e)}`);
+      }
+    }
+
     if (errors.length > 0) {
       return res.json({ ok: false, error: errors.join('; '), steps });
     }
@@ -878,7 +895,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
   router.post('/memory/claude-code-disable', async (_req, res) => {
     try {
-      await execAsync('claude plugin disable hindsight-memory', { timeout: 10_000 });
+      await execAsync('claude plugin disable hindsight-memory@hindsight', { timeout: 10_000 });
       res.json({ ok: true });
     } catch (e: unknown) {
       const err = e as { stderr?: string; message?: string };
@@ -888,7 +905,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
   router.post('/memory/claude-code-enable', async (_req, res) => {
     try {
-      await execAsync('claude plugin enable hindsight-memory', { timeout: 10_000 });
+      await execAsync('claude plugin enable hindsight-memory@hindsight', { timeout: 10_000 });
       res.json({ ok: true });
     } catch (e: unknown) {
       const err = e as { stderr?: string; message?: string };
@@ -898,11 +915,53 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
   router.post('/memory/claude-code-remove', async (_req, res) => {
     try {
-      await execAsync('claude plugin uninstall hindsight-memory', { timeout: 10_000 });
+      await execAsync('claude plugin uninstall hindsight-memory@hindsight', { timeout: 10_000 });
       res.json({ ok: true });
     } catch (e: unknown) {
       const err = e as { stderr?: string; message?: string };
       res.json({ ok: false, error: err.stderr?.trim() || err.message || String(e) });
+    }
+  });
+
+  router.post('/memory/claude-code-update', async (_req, res) => {
+    const errors: string[] = [];
+
+    // Clear cache and reinstall to force fresh pull
+    try {
+      const cacheDir = nodePath.join(os.homedir(), '.claude', 'plugins', 'cache', 'hindsight', 'hindsight-memory');
+      const marketDir = nodePath.join(os.homedir(), '.claude', 'plugins', 'marketplaces', 'hindsight');
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(marketDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+
+    try {
+      await execAsync('claude plugin install hindsight-memory@hindsight', { timeout: 30_000 });
+    } catch (e: unknown) {
+      const err = e as { stderr?: string; message?: string };
+      errors.push(err.stderr?.trim() || err.message || String(e));
+    }
+
+    // Run setup_hooks.py to register hooks
+    if (errors.length === 0) {
+      try {
+        const cacheDir = nodePath.join(os.homedir(), '.claude', 'plugins', 'cache', 'hindsight', 'hindsight-memory');
+        const versions = readdirSync(cacheDir).sort().reverse();
+        if (versions.length > 0) {
+          const setupScript = nodePath.join(cacheDir, versions[0]!, 'scripts', 'setup_hooks.py');
+          if (existsSync(setupScript)) {
+            await execAsync(`python3 "${setupScript}"`, { timeout: 15_000 });
+          }
+        }
+      } catch (e: unknown) {
+        const err = e as { stderr?: string; message?: string };
+        errors.push(`Hook setup: ${err.stderr?.trim() || err.message || String(e)}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      res.json({ ok: false, error: errors.join('; ') });
+    } else {
+      res.json({ ok: true });
     }
   });
 
