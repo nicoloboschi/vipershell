@@ -257,8 +257,9 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    let lastTouchY = 0, lastTouchTime = 0;
-    let accPx = 0, isTouchScrolling = false;
+    let startX = 0, startY = 0, lastTouchY = 0, lastTouchTime = 0;
+    let accPx = 0, totalDy = 0;
+    let isTouchScrolling = false, directionLocked = false;
     let velocity = 0;
     let momentumRaf = 0;
 
@@ -269,32 +270,52 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
     const onTouchStart = (e: TouchEvent): void => {
       stopMomentum();
-      lastTouchY = e.touches[0]!.clientY;
+      startX = e.touches[0]!.clientX;
+      startY = e.touches[0]!.clientY;
+      lastTouchY = startY;
       lastTouchTime = Date.now();
-      accPx = 0; isTouchScrolling = false; velocity = 0;
+      accPx = 0; totalDy = 0;
+      isTouchScrolling = false; directionLocked = false; velocity = 0;
     };
     const onTouchMove = (e: TouchEvent): void => {
       const term = termRef.current;
       if (!term) return;
       const now = Date.now();
+      const x = e.touches[0]!.clientX;
       const y = e.touches[0]!.clientY;
       const dy = lastTouchY - y;
       const dt = Math.max(1, now - lastTouchTime);
+
+      // Lock direction after a few pixels of movement
+      if (!directionLocked) {
+        const adx = Math.abs(x - startX);
+        const ady = Math.abs(y - startY);
+        if (adx + ady > 5) {
+          directionLocked = true;
+          isTouchScrolling = ady > adx; // vertical = scroll, horizontal = let xterm handle
+        }
+      }
+
+      if (!isTouchScrolling) return;
+
+      // Always prevent default once we've decided to scroll —
+      // this stops xterm from doing text selection or its own scroll
+      e.preventDefault();
+      e.stopPropagation();
 
       // Track velocity (px/ms) with smoothing
       velocity = 0.6 * velocity + 0.4 * (dy / dt);
 
       lastTouchY = y;
       lastTouchTime = now;
+      totalDy += dy;
       accPx += dy;
       const lineH = (term.options?.fontSize ?? 14) * (term.options?.lineHeight ?? 1.2);
       const lines = Math.trunc(accPx / lineH);
       if (lines !== 0) {
         accPx -= lines * lineH;
         term.scrollLines(lines);
-        isTouchScrolling = true;
       }
-      if (isTouchScrolling) { e.preventDefault(); e.stopPropagation(); }
     };
     const onTouchEnd = (): void => {
       if (!isTouchScrolling) { velocity = 0; return; }
