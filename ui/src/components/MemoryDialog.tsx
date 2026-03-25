@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import ClaudeIcon from './ClaudeIcon';
 
-const TABS = ['Overview', 'Claude Code', 'Logs'] as const;
+const TABS = ['Overview', 'API Server', 'Claude Code', 'Logs'] as const;
 type Tab = typeof TABS[number];
 
 const LLM_PROVIDERS = ['mock', 'openai', 'anthropic', 'groq', 'ollama', 'gemini', 'lmstudio', 'openai-codex'] as const;
@@ -206,7 +206,7 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
           {/* ════════════════════════ OVERVIEW ════════════════════════ */}
           {tab === 'Overview' && (
             <>
-              {/* Status bar */}
+              {/* Status */}
               {srv && (
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs">
@@ -222,102 +222,108 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
               )}
               {cpError && <p className="text-xs text-destructive">{cpError}</p>}
 
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                <strong className="text-foreground font-semibold">Hindsight</strong> gives your coding agents
+                long-term memory. Conversations are retained and recalled automatically so context carries
+                across sessions.
+              </p>
+
+              {/* Plugin config (no restart) */}
+              {plg && (
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Plugin</span>
+
+                  <Field label="Bank ID" hint="shared across integrations">
+                    <input
+                      type="text"
+                      value={plg.bankId ?? 'hindsight-code'}
+                      onChange={e => setPlg({ ...plg, bankId: e.target.value })}
+                      placeholder="hindsight-code"
+                      className={INPUT}
+                    />
+                    <p className="text-xs text-muted-foreground">Memory bank used by Claude Code and future integrations.</p>
+                  </Field>
+
+                  <Button size="sm" variant="outline" className="self-start flex items-center gap-2" onClick={savePlugin} disabled={plgState === 'loading'}>
+                    {plgState === 'loading' && <Loader size={13} className="animate-spin" />}
+                    {plgState === 'ok' && <Check size={13} />}
+                    {plgState === 'idle' && <Check size={13} className="opacity-0" />}
+                    {plgState === 'loading' ? 'Saving\u2026' : plgState === 'ok' ? 'Saved' : 'Save'}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ════════════════════════ API SERVER ════════════════════════ */}
+          {tab === 'API Server' && (
+            <>
               {!srv ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader size={13} className="animate-spin" /> Loading&hellip;
                 </div>
               ) : (
-                <>
-                  {/* ── Server config (requires restart) ── */}
-                  <div className="flex flex-col gap-3">
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Daemon</span>
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" checked={srv.hindsightEnabled} onChange={e => setSrv({ ...srv, hindsightEnabled: e.target.checked })} className="rounded" />
+                    <span className="text-xs font-medium text-foreground">Enable Hindsight</span>
+                  </label>
 
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input type="checkbox" checked={srv.hindsightEnabled} onChange={e => setSrv({ ...srv, hindsightEnabled: e.target.checked })} className="rounded" />
-                      <span className="text-xs font-medium text-foreground">Enable Hindsight</span>
-                    </label>
+                  <Field label="Mode">
+                    <select value={srv.hindsightMode} onChange={e => setSrv({ ...srv, hindsightMode: e.target.value as HindsightMode })} className={INPUT}>
+                      <option value="embedded">Embedded (local daemon)</option>
+                      <option value="external">External API</option>
+                    </select>
+                  </Field>
 
-                    <Field label="Mode">
-                      <select value={srv.hindsightMode} onChange={e => setSrv({ ...srv, hindsightMode: e.target.value as HindsightMode })} className={INPUT}>
-                        <option value="embedded">Embedded (local daemon)</option>
-                        <option value="external">External API</option>
-                      </select>
-                    </Field>
+                  {srv.hindsightMode === 'external' && (
+                    <>
+                      <Field label="API URL">
+                        <input type="text" value={srv.hindsightApiUrl} onChange={e => setSrv({ ...srv, hindsightApiUrl: e.target.value })} placeholder="https://hindsight.example.com" className={INPUT} />
+                      </Field>
+                      <Field label="API Token" hint="optional">
+                        <input type="password" value={srv.hindsightApiToken} onChange={e => setSrv({ ...srv, hindsightApiToken: e.target.value })} placeholder="Bearer token" className={INPUT} />
+                      </Field>
+                    </>
+                  )}
 
-                    {srv.hindsightMode === 'external' && (
-                      <>
-                        <Field label="API URL">
-                          <input type="text" value={srv.hindsightApiUrl} onChange={e => setSrv({ ...srv, hindsightApiUrl: e.target.value })} placeholder="https://hindsight.example.com" className={INPUT} />
-                        </Field>
-                        <Field label="API Token" hint="optional">
-                          <input type="password" value={srv.hindsightApiToken} onChange={e => setSrv({ ...srv, hindsightApiToken: e.target.value })} placeholder="Bearer token" className={INPUT} />
-                        </Field>
-                      </>
-                    )}
-
-                    {srv.hindsightMode === 'embedded' && (
-                      <>
-                        <Field label="LLM Provider">
-                          <select value={srv.llmProvider} onChange={e => setSrv({ ...srv, llmProvider: e.target.value })} className={INPUT}>
-                            {LLM_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-                          </select>
-                          {srv.llmProvider === 'mock' && <p className="text-xs text-muted-foreground">No LLM calls, chunks stored as-is.</p>}
-                          {srv.llmProvider === 'openai-codex' && <p className="text-xs text-muted-foreground">Uses <code className="bg-muted px-1 rounded">~/.codex/auth.json</code>.</p>}
-                        </Field>
-
-                        {!NO_KEY_PROVIDERS.has(srv.llmProvider) && (
-                          <Field label="API Key">
-                            <input type="password" value={srv.llmApiKey} onChange={e => setSrv({ ...srv, llmApiKey: e.target.value })} placeholder="sk-..." className={INPUT} />
-                          </Field>
-                        )}
-
-                        <Field label="Model" hint="optional">
-                          <input type="text" value={srv.llmModel} onChange={e => setSrv({ ...srv, llmModel: e.target.value })} placeholder="default for provider" className={INPUT} />
-                        </Field>
-                      </>
-                    )}
-
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input type="checkbox" checked={srv.observationsEnabled} onChange={e => setSrv({ ...srv, observationsEnabled: e.target.checked })} className="rounded" />
-                      <span className="text-xs font-medium text-foreground">Enable observations</span>
-                      <span className="text-xs text-muted-foreground">(requires LLM)</span>
-                    </label>
-
-                    {srvState === 'error' && <p className="text-xs text-destructive">{srvError}</p>}
-
-                    <Button size="sm" className="self-start flex items-center gap-2" onClick={saveServer} disabled={srvState === 'loading'}>
-                      {srvState === 'loading' && <Loader size={13} className="animate-spin" />}
-                      {srvState === 'ok' && <Check size={13} />}
-                      {(srvState === 'idle' || srvState === 'error') && <RotateCw size={13} />}
-                      {srvState === 'loading' ? 'Saving\u2026' : srvState === 'ok' ? 'Saved' : 'Save & Restart'}
-                    </Button>
-                  </div>
-
-                  {/* ── Plugin config (no restart) ── */}
-                  {plg && (
-                    <div className="flex flex-col gap-3 pt-3 border-t border-border">
-                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Plugin</span>
-
-                      <Field label="Bank ID" hint="shared across integrations">
-                        <input
-                          type="text"
-                          value={plg.bankId ?? 'hindsight-code'}
-                          onChange={e => setPlg({ ...plg, bankId: e.target.value })}
-                          placeholder="hindsight-code"
-                          className={INPUT}
-                        />
-                        <p className="text-xs text-muted-foreground">Memory bank used by Claude Code and future integrations.</p>
+                  {srv.hindsightMode === 'embedded' && (
+                    <>
+                      <Field label="LLM Provider">
+                        <select value={srv.llmProvider} onChange={e => setSrv({ ...srv, llmProvider: e.target.value })} className={INPUT}>
+                          {LLM_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        {srv.llmProvider === 'mock' && <p className="text-xs text-muted-foreground">No LLM calls, chunks stored as-is.</p>}
+                        {srv.llmProvider === 'openai-codex' && <p className="text-xs text-muted-foreground">Uses <code className="bg-muted px-1 rounded">~/.codex/auth.json</code>.</p>}
                       </Field>
 
-                      <Button size="sm" variant="outline" className="self-start flex items-center gap-2" onClick={savePlugin} disabled={plgState === 'loading'}>
-                        {plgState === 'loading' && <Loader size={13} className="animate-spin" />}
-                        {plgState === 'ok' && <Check size={13} />}
-                        {plgState === 'idle' && <Check size={13} className="opacity-0" />}
-                        {plgState === 'loading' ? 'Saving\u2026' : plgState === 'ok' ? 'Saved' : 'Save'}
-                      </Button>
-                    </div>
+                      {!NO_KEY_PROVIDERS.has(srv.llmProvider) && (
+                        <Field label="API Key">
+                          <input type="password" value={srv.llmApiKey} onChange={e => setSrv({ ...srv, llmApiKey: e.target.value })} placeholder="sk-..." className={INPUT} />
+                        </Field>
+                      )}
+
+                      <Field label="Model" hint="optional">
+                        <input type="text" value={srv.llmModel} onChange={e => setSrv({ ...srv, llmModel: e.target.value })} placeholder="default for provider" className={INPUT} />
+                      </Field>
+                    </>
                   )}
-                </>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" checked={srv.observationsEnabled} onChange={e => setSrv({ ...srv, observationsEnabled: e.target.checked })} className="rounded" />
+                    <span className="text-xs font-medium text-foreground">Enable observations</span>
+                    <span className="text-xs text-muted-foreground">(requires LLM)</span>
+                  </label>
+
+                  {srvState === 'error' && <p className="text-xs text-destructive">{srvError}</p>}
+
+                  <Button size="sm" className="self-start flex items-center gap-2" onClick={saveServer} disabled={srvState === 'loading'}>
+                    {srvState === 'loading' && <Loader size={13} className="animate-spin" />}
+                    {srvState === 'ok' && <Check size={13} />}
+                    {(srvState === 'idle' || srvState === 'error') && <RotateCw size={13} />}
+                    {srvState === 'loading' ? 'Saving\u2026' : srvState === 'ok' ? 'Saved' : 'Save & Restart'}
+                  </Button>
+                </div>
               )}
             </>
           )}
