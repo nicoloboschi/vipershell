@@ -160,13 +160,8 @@ export class AIService {
 
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this session. Start with a relevant emoji. Just output the name, nothing else. No quotes.\n\nTerminal output:\n${snippet}`;
 
-      let name: string;
-      if (provider === 'claude-code') {
-        // --bare skips hooks/plugins so the prompt doesn't leak into Hindsight
-        name = (await runWithStdin('claude', ['--bare', '--print', '-'], prompt)).trim();
-      } else {
-        name = (await runWithStdin('codex', ['--print', '-'], prompt)).trim();
-      }
+      const cli = provider === 'claude-code' ? 'claude' : 'codex';
+      const name = (await runWithStdin(cli, ['--print', '-'], prompt)).trim();
 
       if (!name || name.length > 80 || name.includes('\n')) return;
 
