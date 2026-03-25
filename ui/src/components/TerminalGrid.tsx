@@ -7,15 +7,9 @@ import useStore from '../store';
 export type Layout = 'single' | 'horizontal' | 'vertical' | 'quad';
 
 interface TerminalGridProps {
-  /** Primary session ID for the first cell */
   sessionId: string;
-  /** Callback to create a child session in the same dir. Returns the new session ID. */
   onCreateSplit: () => Promise<string | null>;
-  /** Called when a child session should be closed */
-  onCloseSplit?: (sessionId: string) => void;
-  /** Called when a file link is clicked in the terminal */
   onFileLinkClick?: (path: string) => void;
-  /** Exposes layout state and change handler to parent */
   onLayoutReady?: (info: { layout: Layout; changeLayout: (l: Layout) => void }) => void;
 }
 
@@ -36,14 +30,24 @@ function saveGridState(sessionId: string, layout: Layout, cells: string[]): void
   } catch { /* ignore */ }
 }
 
-export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
+function layoutCellCount(layout: Layout): number {
+  switch (layout) {
+    case 'single': return 1;
+    case 'horizontal': return 2;
+    case 'vertical': return 2;
+    case 'quad': return 4;
+  }
+}
+
+export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
   const [layout, setLayout] = useState<Layout>('single');
-  // cells: string = session ID, null = loading placeholder
+  // All cells ever created for this session. Index 0 is always the main session.
+  // null = still being created. Sessions persist even when layout shrinks.
   const [cells, setCells] = useState<(string | null)[]>([sessionId]);
   const [activeCell, setActiveCell] = useState(0);
-  const pendingRef = useRef(0); // track in-flight split creations
+  const creatingRef = useRef(false);
 
-  // Reset when session changes; clean up old splits
+  // Restore saved state when session changes
   useEffect(() => {
     const saved = loadGridState(sessionId);
     if (saved && saved.cells.length > 0 && saved.cells[0] === sessionId) {
@@ -59,8 +63,8 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
     }
     setActiveCell(0);
 
-    // Cleanup: unregister splits when switching away
     return () => {
+      // Unregister splits when switching away (they stay alive on the server)
       const stored = loadGridState(sessionId);
       if (stored) {
         for (let i = 1; i < stored.cells.length; i++) {
@@ -70,89 +74,61 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
     };
   }, [sessionId]);
 
-  // Persist grid state (only if no loading placeholders)
+  // Persist grid state whenever cells are fully resolved
   useEffect(() => {
     if (cells.every(c => c !== null)) {
       saveGridState(sessionId, layout, cells as string[]);
     }
   }, [sessionId, layout, cells]);
 
-  const addSplit = useCallback(async (newLayout: Layout) => {
-    const needed = layoutCellCount(newLayout);
-    const currentCells = [...cells];
+  // Create any missing sessions in parallel
+  const ensureCells = useCallback(async (needed: number) => {
+    if (creatingRef.current) return;
+    // Use functional state to get the latest cells
+    setCells(currentCells => {
+      const have = currentCells.length;
+      if (have >= needed) return currentCells;
 
-    // Remove excess cells first
-    while (currentCells.length > needed) {
-      const removed = currentCells.pop()!;
-      if (removed && removed !== sessionId) {
-        useStore.getState().removeSplitSession(removed);
-        onCloseSplit?.(removed);
-      }
-    }
+      const toCreate = needed - have;
+      // Add null placeholders immediately
+      const next = [...currentCells, ...Array(toCreate).fill(null) as null[]];
 
-    // If we need more, set layout immediately with null placeholders (shows loading)
-    const toCreate = needed - currentCells.length;
-    for (let i = 0; i < toCreate; i++) currentCells.push(null);
-
-    setCells(currentCells);
-    setLayout(newLayout);
-
-    // Create sessions in background
-    if (toCreate > 0) {
-      pendingRef.current += toCreate;
-      for (let i = needed - toCreate; i < needed; i++) {
-        const idx = i;
-        onCreateSplit().then(newId => {
-          pendingRef.current--;
+      // Create all in parallel
+      creatingRef.current = true;
+      const promises = Array.from({ length: toCreate }, (_, i) => {
+        const idx = have + i;
+        return onCreateSplit().then(newId => {
           if (newId) {
             setCells(prev => {
-              const next = [...prev];
-              next[idx] = newId;
-              return next;
+              const updated = [...prev];
+              updated[idx] = newId;
+              return updated;
             });
           }
         });
-      }
-    }
-  }, [cells, sessionId, onCreateSplit, onCloseSplit]);
+      });
+      Promise.all(promises).finally(() => { creatingRef.current = false; });
+
+      return next;
+    });
+  }, [onCreateSplit]);
+
+  const changeLayout = useCallback((newLayout: Layout) => {
+    setLayout(newLayout);
+    const needed = layoutCellCount(newLayout);
+    setActiveCell(prev => Math.min(prev, needed - 1));
+    ensureCells(needed);
+  }, [ensureCells]);
 
   // Expose layout state to parent
   useEffect(() => {
-    onLayoutReady?.({ layout, changeLayout: addSplit });
-  }, [layout, addSplit, onLayoutReady]);
+    onLayoutReady?.({ layout, changeLayout });
+  }, [layout, changeLayout, onLayoutReady]);
 
-  const closeCell = useCallback((index: number) => {
-    if (cells.length <= 1) return;
-    const removed = cells[index];
-
-    // Close the split session on the server and unregister it
-    if (removed && removed !== sessionId) {
-      useStore.getState().removeSplitSession(removed);
-      onCloseSplit?.(removed);
-    }
-
-    const newCells = cells.filter((_, i) => i !== index);
-
-    // Determine new layout
-    let newLayout: Layout = 'single';
-    if (newCells.length === 2) newLayout = layout === 'quad' ? 'horizontal' : layout;
-    if (newCells.length === 3) newLayout = 'quad';
-    if (newCells.length >= 4) newLayout = 'quad';
-
-    setCells(newCells);
-    setLayout(newLayout);
-    setActiveCell(prev => Math.min(prev, newCells.length - 1));
-
-    // Persist immediately
-    if (newCells.every(c => c !== null)) {
-      saveGridState(sessionId, newLayout, newCells as string[]);
-    }
-  }, [cells, sessionId, layout, onCloseSplit]);
-
+  const visibleCount = layoutCellCount(layout);
 
   const renderCell = (index: number) => {
     const sid = cells[index];
-    // Loading placeholder
     if (sid === null || sid === undefined) {
       return (
         <div style={{
@@ -170,7 +146,6 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
         sessionId={sid}
         isActive={activeCell === index}
         onActivate={() => setActiveCell(index)}
-        onClose={cells.length > 1 ? () => closeCell(index) : null}
         onFileLinkClick={onFileLinkClick}
       />
     );
@@ -181,6 +156,9 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
       className={`terminal-resize-handle terminal-resize-handle-${dir}`}
     />
   );
+
+  // Render hidden cells so their WS connections stay alive
+  const hiddenCells = cells.slice(visibleCount).filter((sid): sid is string => sid !== null);
 
   return (
     <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
@@ -221,15 +199,18 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onCloseSplit, o
           </Panel>
         </PanelGroup>
       )}
+
+      {/* Keep hidden split sessions alive (WS connected, just not visible) */}
+      {hiddenCells.map(sid => (
+        <div key={sid} style={{ display: 'none' }}>
+          <TerminalCell
+            sessionId={sid}
+            isActive={false}
+            onActivate={() => {}}
+            onFileLinkClick={onFileLinkClick}
+          />
+        </div>
+      ))}
     </div>
   );
-}
-
-function layoutCellCount(layout: Layout): number {
-  switch (layout) {
-    case 'single': return 1;
-    case 'horizontal': return 2;
-    case 'vertical': return 2;
-    case 'quad': return 4;
-  }
 }

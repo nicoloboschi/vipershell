@@ -107,10 +107,6 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     } catch { return null; }
   }, [sessionId, sessionMap, send]);
 
-  const handleCloseSplit = useCallback((splitSessionId: string) => {
-    send({ type: 'close_session', session_id: splitSessionId });
-  }, [send]);
-
   const handleFileLinkClick = useCallback(async (rawPath: string) => {
     let cleaned = rawPath;
     let line: number | null = null;
@@ -160,7 +156,6 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
           <TerminalGrid
             sessionId={sessionId}
             onCreateSplit={handleCreateSplit}
-            onCloseSplit={handleCloseSplit}
             onFileLinkClick={handleFileLinkClick}
             onLayoutReady={({ layout: l, changeLayout }) => {
               setGridLayout(l);

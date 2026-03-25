@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { X } from 'lucide-react';
 import useStore, { activeTerminalSend } from '../store';
 
 const filterAltScreen = (data: string): string =>
@@ -21,11 +20,10 @@ interface TerminalCellProps {
   sessionId: string;
   isActive: boolean;
   onActivate: () => void;
-  onClose?: (() => void) | null;
   onFileLinkClick?: (path: string) => void;
 }
 
-export default function TerminalCell({ sessionId, isActive, onActivate, onClose, onFileLinkClick }: TerminalCellProps) {
+export default function TerminalCell({ sessionId, isActive, onActivate, onFileLinkClick }: TerminalCellProps) {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -279,23 +277,6 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onClose,
       }}
       onClick={onActivate}
     >
-      {onClose && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          title="Close split"
-          style={{
-            position: 'absolute', top: 4, right: 4, zIndex: 10,
-            background: 'rgba(13,17,23,0.8)', border: '1px solid var(--border)',
-            borderRadius: 4, cursor: 'pointer', padding: 2,
-            color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center',
-            opacity: 0.5, transition: 'opacity 0.15s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; }}
-        >
-          <X size={12} />
-        </button>
-      )}
       <div
         ref={containerRef}
         style={{ position: 'absolute', inset: 0, padding: 8, overflow: 'hidden' }}
