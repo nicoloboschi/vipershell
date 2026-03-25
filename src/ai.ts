@@ -22,8 +22,14 @@ function runWithStdin(cmd: string, args: string[], input: string, timeoutMs = 30
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0) resolve(stdout);
-      else reject(new Error(`${cmd} exited with code ${code}: ${stderr.slice(0, 200)}`));
+      if (code === 0) {
+        if (!stdout.trim() && stderr.trim()) {
+          reject(new Error(`${cmd} returned empty stdout, stderr: ${stderr.slice(0, 300)}`));
+        } else {
+          resolve(stdout);
+        }
+      }
+      else reject(new Error(`${cmd} exited with code ${code}: ${stderr.slice(0, 300)}`));
     });
     child.stdin.write(input);
     child.stdin.end();
@@ -117,14 +123,12 @@ export class AIService {
     const now = Date.now();
     const minInterval = (cfg.autoNamingIntervalSecs || 30) * 1000;
 
+    // Process one session at a time to avoid concurrent CLI calls
     for (const session of sessions) {
-      // Skip sessions that were recently named or are in-flight
       const lastTime = this.lastNamed.get(session.id) ?? 0;
       if (now - lastTime < minInterval) continue;
       if (this.inFlight.has(session.id)) continue;
 
-      // Skip sessions that already have a user-set name (not the default tmux name)
-      // Default tmux names are digits or the path basename
       const defaultName = session.path?.split('/').pop() ?? 'shell';
       const isDefaultName = session.name === defaultName
         || /^\d+$/.test(session.name)
@@ -132,16 +136,16 @@ export class AIService {
         || session.name === 'zsh'
         || session.name === 'bash'
         || session.name === 'fish';
-      // Only rename sessions with default-looking names OR previous AI names
-      // AI names contain emojis or multi-word descriptions
       const looksAiNamed = /[\u{1F300}-\u{1FAFF}]/u.test(session.name) || session.name.split(/\s+/).length > 2;
       if (!isDefaultName && !looksAiNamed) continue;
 
       this.inFlight.add(session.id);
-      this._nameSession(session.id, cfg.aiProvider).finally(() => {
+      try {
+        await this._nameSession(session.id, cfg.aiProvider);
+      } finally {
         this.inFlight.delete(session.id);
         this.lastNamed.set(session.id, Date.now());
-      });
+      }
     }
   }
 
@@ -162,12 +166,13 @@ export class AIService {
 
       const cli = provider === 'claude-code' ? 'claude' : 'codex';
       const args = cli === 'claude'
-        ? ['--print', '--model', 'haiku', '-']
-        : ['--print', '-'];
+        ? ['-p', '--model', 'haiku', prompt]
+        : ['-p', prompt];
 
-      logger.debug(`AI naming ${sessionId}: calling ${cli} (${snippet.length} chars input)`);
+      logger.debug(`AI naming ${sessionId}: calling ${cli} (${snippet.length} chars of terminal)`);
       const t0 = Date.now();
-      const name = (await runWithStdin(cli, args, prompt)).trim();
+      const raw = await runWithStdin(cli, args, '');
+      const name = raw.trim();
       logger.debug(`AI naming ${sessionId}: got "${name}" in ${Date.now() - t0}ms`);
 
       if (!name || name.length > 80 || name.includes('\n')) return;

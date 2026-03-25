@@ -670,13 +670,25 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
   // ── Memory config & control ──────────────────────────────────────────────────
 
-  router.get('/memory/config', (_req, res) => {
+  router.get('/memory/config', async (_req, res) => {
     const cfg = memory.getConfig();
+    let controlPlaneActive = false;
+    try {
+      const resp = await fetch(`http://127.0.0.1:${cfg.uiPort}/api/health`, { signal: AbortSignal.timeout(1500) });
+      controlPlaneActive = resp.ok;
+    } catch {
+      // Fallback: try root path (Next.js may not have /api/health)
+      try {
+        const resp = await fetch(`http://127.0.0.1:${cfg.uiPort}/`, { signal: AbortSignal.timeout(1500) });
+        controlPlaneActive = resp.ok;
+      } catch { /* not running */ }
+    }
     res.json({
       ...cfg,
       active: memory.active,
       mode: memory.mode,
       started_at: memory.startedAt,
+      controlPlaneActive,
     });
   });
 

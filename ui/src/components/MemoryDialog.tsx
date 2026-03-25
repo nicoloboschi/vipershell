@@ -24,6 +24,7 @@ interface ServerConfig {
   observationsEnabled: boolean;
   active?: boolean;
   mode?: string;
+  controlPlaneActive?: boolean;
 }
 
 interface PluginConfig {
@@ -211,16 +212,34 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
             <>
               {/* Status */}
               {srv && (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className={`w-1.5 h-1.5 rounded-full ${srv.active ? 'bg-green-500' : srv.hindsightEnabled ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
+                <div className="rounded-md border border-border px-3 py-2.5 flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${srv.active ? 'bg-green-500' : srv.hindsightEnabled ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
                     <span className="text-muted-foreground">
-                      {srv.active ? `Active (${srv.mode ?? srv.hindsightMode})` : srv.hindsightEnabled ? 'Starting\u2026' : 'Disabled'}
+                      API: {srv.active ? <span className="text-green-500 font-medium">active ({srv.mode ?? srv.hindsightMode})</span> : srv.hindsightEnabled ? <span className="text-yellow-500 font-medium">starting</span> : 'disabled'}
                     </span>
                   </div>
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex items-center gap-1.5" onClick={openControlPlane}>
-                    <ExternalLink size={11} /> Control Plane
-                  </Button>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${srv.controlPlaneActive ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                      <span className="text-muted-foreground">
+                        Control Plane: {srv.controlPlaneActive ? <span className="text-green-500 font-medium">running</span> : 'not running'}
+                      </span>
+                    </div>
+                    {srv.controlPlaneActive ? (
+                      <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] flex items-center gap-1" onClick={openControlPlane}>
+                        <ExternalLink size={10} /> Open
+                      </Button>
+                    ) : srv.active && (
+                      <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] flex items-center gap-1" onClick={async () => {
+                        await openControlPlane();
+                        // Refresh status after starting
+                        setTimeout(() => fetch('/api/memory/config').then(r => r.json()).then(setSrv).catch(() => {}), 3000);
+                      }}>
+                        <Power size={10} /> Start & Open
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
               {cpError && <p className="text-xs text-destructive">{cpError}</p>}
