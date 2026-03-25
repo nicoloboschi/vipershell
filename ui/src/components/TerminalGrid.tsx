@@ -82,15 +82,8 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
     setActiveCell(0);
     initializedRef.current = true;
 
-    return () => {
-      // Unregister splits when switching away
-      const stored = loadGridState(sessionId);
-      if (stored) {
-        for (let i = 1; i < stored.cells.length; i++) {
-          if (stored.cells[i]) useStore.getState().removeSplitSession(stored.cells[i]!);
-        }
-      }
-    };
+    // No cleanup — splits stay registered (hidden from sidebar) even when
+    // switching to another session. They're loaded from localStorage on init.
   }, [sessionId]);
 
   // Persist grid state — but only after initial restore
