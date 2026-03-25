@@ -4,6 +4,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { ArrowDown } from 'lucide-react';
 import useStore, { activeTerminalSend, activeTerminalRefresh } from '../store';
+import { wsUrl } from '../serverUrl';
 
 const filterAltScreen = (data: string): string =>
   data
@@ -137,8 +138,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
     function openWs(): void {
       if (!mountedRef.current) return;
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${location.host}/ws`);
+      ws = new WebSocket(wsUrl());
       wsRef.current = ws;
 
       sendRef.current = (msg: Record<string, unknown>) => {

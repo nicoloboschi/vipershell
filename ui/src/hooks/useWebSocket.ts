@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import useStore from '../store';
+import { wsUrl } from '../serverUrl';
 
 interface UseWebSocketOptions {
   onMessage: (msg: Record<string, unknown>) => void;
@@ -40,8 +41,7 @@ export function useWebSocket({ onMessage, onOpen }: UseWebSocketOptions): UseWeb
 
     useStore.getState().setWsStatus('connecting');
 
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${location.host}/ws`);
+    const ws = new WebSocket(wsUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {
