@@ -252,11 +252,11 @@
   padding: 8px; max-height: 65vh; overflow-y: auto;
   font-family: monospace; font-size: 11px; line-height: 1.5;
 }
-.log-entry { white-space: pre-wrap; word-break: break-all; }
-.log-entry.ERROR, .log-entry.CRITICAL { color: var(--destructive); }
-.log-entry.WARNING { color: var(--warning); }
-.log-entry.INFO    { color: var(--muted-foreground); }
-.log-entry.DEBUG   { color: var(--muted); }
+.log-entry { white-space: pre-wrap; word-break: break-all; color: var(--foreground); }
+.log-entry.ERROR, .log-entry.CRITICAL { color: #ff7b72; }
+.log-entry.WARNING { color: #e3b341; }
+.log-entry.INFO    { color: var(--foreground); }
+.log-entry.DEBUG   { color: var(--muted-foreground); }
 
 /* ── Markdown preview ─────────────────────────────────────────────────────────── */
 .md-preview { color: #c9d1d9; font-size: 14px; line-height: 1.7; max-width: 800px; }

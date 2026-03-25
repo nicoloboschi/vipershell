@@ -806,11 +806,20 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       }
     } catch { /* claude CLI not available */ }
 
+    // Get installed version
+    let pluginVersion = '';
+    try {
+      const cacheDir = nodePath.join(os.homedir(), '.claude', 'plugins', 'cache', 'hindsight', 'hindsight-memory');
+      const versions = readdirSync(cacheDir).sort().reverse();
+      if (versions.length > 0) pluginVersion = versions[0]!;
+    } catch { /* no cache */ }
+
     res.json({
       pluginInstalled,
       pluginEnabled,
       configExists,
       configUrl,
+      pluginVersion,
     });
   });
 

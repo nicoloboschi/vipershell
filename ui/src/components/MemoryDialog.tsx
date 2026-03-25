@@ -73,9 +73,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     pluginEnabled: boolean;
     configExists: boolean;
     configUrl: string;
+    pluginVersion: string;
   } | null>(null);
-  const [actionState, setActionState] = useState<AsyncState>('idle');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
+  const [actionDone, setActionDone] = useState(false);
 
   const [cpError, setCpError] = useState('');
 
@@ -135,13 +137,14 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
   }
 
   async function ccAction(endpoint: string) {
-    setActionState('loading'); setActionError('');
+    setActionLoading(endpoint); setActionError(''); setActionDone(false);
     try {
       const res = await fetch(`/api/memory/${endpoint}`, { method: 'POST' });
       const { ok, error } = await res.json();
-      if (ok) { setActionState('ok'); fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {}); setTimeout(() => setActionState('idle'), 1500); }
-      else { setActionState('error'); setActionError(error || 'Unknown error'); }
-    } catch { setActionState('error'); setActionError('Request failed'); }
+      if (ok) { setActionDone(true); fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {}); }
+      else { setActionError(error || 'Unknown error'); }
+    } catch { setActionError('Request failed'); }
+    setActionLoading(null);
   }
 
   /* ── Logs ── */
@@ -364,25 +367,31 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
               {ccStatus?.pluginInstalled && ccStatus?.configExists ? (
                 <>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    The <strong className="text-foreground">Hindsight plugin</strong> is installed and configured.
-                    Claude Code has long-term memory powered by vipershell&apos;s Hindsight.
+                    The <strong className="text-foreground">Hindsight plugin</strong>
+                    {ccStatus.pluginVersion && <> <code className="text-[10px] bg-muted px-1 rounded">v{ccStatus.pluginVersion}</code></>}
+                    {' '}is installed and configured.
                   </p>
-                  {actionState === 'error' && <p className="text-xs text-destructive break-words">{actionError}</p>}
+                  {actionError && <p className="text-xs text-destructive break-words">{actionError}</p>}
+                  {actionDone && (
+                    <p className="text-xs text-yellow-500">
+                      Run <code className="bg-muted px-1 rounded text-[10px]">/reload-plugins</code> in open Claude Code sessions to apply changes.
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-update')} disabled={actionState === 'loading'}>
-                      {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />} Update
+                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-update')} disabled={!!actionLoading}>
+                      {actionLoading === 'claude-code-update' ? <Loader size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />} Update
                     </Button>
                     {ccStatus.pluginEnabled ? (
-                      <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-disable')} disabled={actionState === 'loading'}>
-                        {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <PowerOff size={13} />} Disable
+                      <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-disable')} disabled={!!actionLoading}>
+                        {actionLoading === 'claude-code-disable' ? <Loader size={13} className="animate-spin" /> : <PowerOff size={13} />} Disable
                       </Button>
                     ) : (
-                      <Button size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-enable')} disabled={actionState === 'loading'}>
-                        {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <Power size={13} />} Enable
+                      <Button size="sm" className="flex items-center gap-2" onClick={() => ccAction('claude-code-enable')} disabled={!!actionLoading}>
+                        {actionLoading === 'claude-code-enable' ? <Loader size={13} className="animate-spin" /> : <Power size={13} />} Enable
                       </Button>
                     )}
-                    <Button variant="outline" size="sm" className="flex items-center gap-2 text-destructive hover:text-destructive" onClick={() => ccAction('claude-code-remove')} disabled={actionState === 'loading'}>
-                      {actionState === 'loading' ? <Loader size={13} className="animate-spin" /> : <Trash2 size={13} />} Remove
+                    <Button variant="outline" size="sm" className="flex items-center gap-2 text-destructive hover:text-destructive" onClick={() => ccAction('claude-code-remove')} disabled={!!actionLoading}>
+                      {actionLoading === 'claude-code-remove' ? <Loader size={13} className="animate-spin" /> : <Trash2 size={13} />} Remove
                     </Button>
                   </div>
                 </>
@@ -404,6 +413,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       {(ccState === 'idle' || ccState === 'error') && <ClaudeIcon size={13} />}
                       {ccState === 'loading' ? 'Installing\u2026' : ccState === 'ok' ? 'Installed & configured' : 'Install Hindsight Plugin'}
                     </Button>
+                    {ccState === 'ok' && (
+                      <p className="text-xs text-yellow-500">
+                        Run <code className="bg-muted px-1 rounded text-[10px]">/reload-plugins</code> in open Claude Code sessions to apply changes.
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-semibold text-foreground">Or install manually</span>

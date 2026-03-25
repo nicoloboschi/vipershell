@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
@@ -7,6 +7,28 @@ import { logger } from './server.js';
 import type { TmuxBridge } from './bridge.js';
 
 const execAsync = promisify(exec);
+
+/** Run a CLI command with stdin input, return stdout. */
+function runWithStdin(cmd: string, args: string[], input: string, timeoutMs = 30_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, LANG: 'en_US.UTF-8' },
+      timeout: timeoutMs,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`${cmd} exited with code ${code}: ${stderr.slice(0, 200)}`));
+    });
+    child.stdin.write(input);
+    child.stdin.end();
+  });
+}
 const CONFIG_PATH = join(homedir(), '.config', 'vipershell', 'config.json');
 
 export type AIProvider = 'claude-code' | 'codex';
@@ -138,21 +160,8 @@ export class AIService {
 
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this session. Start with a relevant emoji. Just output the name, nothing else. No quotes.\n\nTerminal output:\n${snippet}`;
 
-      let name: string;
-      if (provider === 'claude-code') {
-        const { stdout } = await execAsync(
-          `echo ${shellEscape(prompt)} | claude --print -`,
-          { timeout: 30_000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
-        );
-        name = stdout.trim();
-      } else {
-        // codex
-        const { stdout } = await execAsync(
-          `echo ${shellEscape(prompt)} | codex --print -`,
-          { timeout: 30_000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
-        );
-        name = stdout.trim();
-      }
+      const cli = provider === 'claude-code' ? 'claude' : 'codex';
+      const name = (await runWithStdin(cli, ['--print', '-'], prompt)).trim();
 
       if (!name || name.length > 80 || name.includes('\n')) return;
 
@@ -163,8 +172,4 @@ export class AIService {
       logger.debug(`AI naming failed for ${sessionId}: ${e}`);
     }
   }
-}
-
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
