@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { ArrowDown, Upload } from 'lucide-react';
-import useStore, { activeTerminalSend, activeTerminalRefresh } from '../store';
+import useStore, { activeTerminalSend, activeTerminalRefresh, activeTerminalScrollToLine, addCommandEntry } from '../store';
 import { wsUrl } from '../serverUrl';
 
 const filterAltScreen = (data: string): string =>
@@ -73,10 +73,33 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       fit.fit();
     }
 
-    // Input handler
+    // Input handler — also tracks typed commands for the history TOC
+    let inputBuf = '';
     const dataDispose = term.onData((data: string) => {
       if (/^\x1b\[[\?>][\d;]*c$/.test(data)) return;
       sendRef.current({ type: 'input', data });
+
+      // Command accumulation (mirrors server-side logic)
+      for (const ch of data) {
+        if (ch === '\r' || ch === '\n') {
+          if (inputBuf.trim()) {
+            const buf = term.buffer.active;
+            addCommandEntry(sessionId, inputBuf, buf.baseY + buf.cursorY);
+          }
+          inputBuf = '';
+        } else if (ch === '\x7f' || ch === '\b') {
+          inputBuf = inputBuf.slice(0, -1);
+        } else if (ch === '\x15') {        // Ctrl-U: clear line
+          inputBuf = '';
+        } else if (ch === '\x17') {        // Ctrl-W: delete word
+          inputBuf = inputBuf.replace(/\S+\s*$/, '');
+        } else if (ch >= ' ' && ch <= '~') {
+          inputBuf += ch;
+        } else if (ch === '\t') {
+          inputBuf += ' ';                  // approximate tab-completion
+        }
+        // skip escape sequences, control chars, etc.
+      }
     });
 
     // Scroll position tracking — show "jump to bottom" when scrolled up
@@ -265,6 +288,11 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       termRef.current?.focus();
       activeTerminalSend.current = (msg) => sendRef.current(msg);
       activeTerminalRefresh.current = () => sendRef.current({ type: 'connect', session_id: sessionId });
+      activeTerminalScrollToLine.current = (line: number) => {
+        const term = termRef.current;
+        if (!term) return;
+        term.scrollToLine(Math.max(0, line - Math.floor(term.rows / 4)));
+      };
     }
   }, [isActive]);
 

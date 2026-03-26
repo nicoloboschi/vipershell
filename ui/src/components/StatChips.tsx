@@ -549,10 +549,15 @@ interface GitChipProps {
 }
 
 function extractPrUrls(urls: string[]): { num: number; url: string }[] {
+  const seen = new Set<number>();
   const prs: { num: number; url: string }[] = [];
   for (const url of urls) {
     const m = url.match(GH_PR_RE);
-    if (m) prs.push({ num: parseInt(m[3]!, 10), url });
+    if (!m) continue;
+    const num = parseInt(m[3]!, 10);
+    if (seen.has(num)) continue;
+    seen.add(num);
+    prs.push({ num, url });
   }
   // Sort descending by PR number (highest first)
   prs.sort((a, b) => b.num - a.num);

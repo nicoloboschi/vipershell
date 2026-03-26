@@ -253,13 +253,34 @@ function StatBar({ add, del }: StatBarProps) {
 
 interface FileSidebarProps {
   files: DiffFile[];
+  focusedIndex: number;
   onJump: (path: string) => void;
+  onSelect: (index: number) => void;
   onOpenFile: ((path: string) => void) | null;
 }
 
-function FileSidebar({ files, onJump, onOpenFile }: FileSidebarProps) {
+function FileSidebar({ files, focusedIndex, onJump, onSelect, onOpenFile }: FileSidebarProps) {
   const totalAdd = files.reduce((s, f) => s + f.additions, 0);
   const totalDel = files.reduce((s, f) => s + f.deletions, 0);
+
+  // Group files by directory, sorted alphabetically
+  const grouped = (() => {
+    const map = new Map<string, { file: DiffFile; index: number; name: string }[]>();
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]!;
+      const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
+      const parts = path.split('/');
+      const name = parts.pop()!;
+      const dir = parts.join('/') || '.';
+      if (!map.has(dir)) map.set(dir, []);
+      map.get(dir)!.push({ file, index: i, name });
+    }
+    // Sort dirs alphabetically, sort files within each dir alphabetically
+    const sorted = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [, entries] of sorted) entries.sort((a, b) => a.name.localeCompare(b.name));
+    return sorted;
+  })();
+
   return (
     <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #30363d', overflowY: 'auto', background: '#0d1117' }}>
       <div style={{ padding: '6px 10px', borderBottom: '1px solid #30363d', background: '#161b22', fontSize: 11, color: '#6e7681', display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -267,36 +288,46 @@ function FileSidebar({ files, onJump, onOpenFile }: FileSidebarProps) {
         <span style={{ color: '#3fb950' }}>+{totalAdd}</span>
         <span style={{ color: '#ff7b72' }}>-{totalDel}</span>
       </div>
-      {files.map((file, i) => {
-        const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
-        const name = path.split('/').pop();
-        const dir = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '';
-        return (
-          <div
-            key={i}
-            style={{ padding: '5px 10px', cursor: 'pointer', borderBottom: '1px solid #161b22', display: 'flex', flexDirection: 'column', gap: 3 }}
-            onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = '#161b22'; }}
-            onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <StatBar add={file.additions} del={file.deletions} />
-              <span onClick={() => onJump(path)} style={{ fontSize: 12, color: '#e6edf3', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, cursor: 'pointer' }}>{name}</span>
-              {onOpenFile && (
-                <button
-                  title="Open in Files"
-                  onClick={() => onOpenFile(path)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
-                  onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#79c0ff'; }}
-                  onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#484f58'; }}
-                >
-                  <FolderOpen size={11} />
-                </button>
-              )}
-            </div>
-            {dir && <div style={{ fontSize: 10, color: '#484f58', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: 14 }}>{dir}</div>}
+      {grouped.map(([dir, entries]) => (
+        <div key={dir}>
+          <div style={{ padding: '5px 10px 3px', fontSize: 10, color: '#6e7681', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#0d1117', borderBottom: '1px solid #161b22', position: 'sticky', top: 0, zIndex: 1 }}>
+            {dir}
           </div>
-        );
-      })}
+          {entries.map(({ file, index, name }) => {
+            const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
+            const isFocused = index === focusedIndex;
+            return (
+              <div
+                key={index}
+                onClick={() => { onSelect(index); onJump(path); }}
+                style={{
+                  padding: '4px 10px 4px 18px', cursor: 'pointer', borderBottom: '1px solid #161b22',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: isFocused ? '#1f3a56' : 'transparent',
+                  borderLeft: isFocused ? '2px solid #58a6ff' : '2px solid transparent',
+                }}
+                onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = '#161b22'; }}
+                onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {file.isNew ? <FilePlus size={11} color="#3fb950" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={11} color="#ff7b72" style={{ flexShrink: 0 }} /> : <FileCode size={11} color="#6e7681" style={{ flexShrink: 0 }} />}
+                <span style={{ fontSize: 12, color: '#e6edf3', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
+                <StatBar add={file.additions} del={file.deletions} />
+                {onOpenFile && (
+                  <button
+                    title="Open in Files"
+                    onClick={(e) => { e.stopPropagation(); onOpenFile(path); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
+                    onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#79c0ff'; }}
+                    onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#484f58'; }}
+                  >
+                    <FolderOpen size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -585,7 +616,9 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
           <div className="hidden md:flex flex-col" style={{ width: 240, flexShrink: 0, borderRight: '1px solid #30363d' }}>
             <FileSidebar
               files={files}
+              focusedIndex={focusedFileIdx}
               onJump={jumpToFile}
+              onSelect={setFocusedFileIdx}
               onOpenFile={onOpenFile && gitRoot ? (relPath: string) => onOpenFile(`${gitRoot}/${relPath}`) : null}
             />
           </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, RefreshCw } from 'lucide-react';
-import useStore, { activeTerminalRefresh } from '../store';
+import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, RefreshCw, List } from 'lucide-react';
+import useStore, { activeTerminalRefresh, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry } from '../store';
 import StatChips from './StatChips';
 import ClaudeIcon from './ClaudeIcon';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
@@ -229,8 +229,20 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           className="flex items-center gap-2 px-4 py-1"
           style={{ borderTop: '1px solid var(--border)', opacity: 0.95 }}
         >
+          {session?.path && (
+            <span
+              className="text-muted-foreground"
+              style={{ fontSize: 10, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}
+              title={session.path}
+            >
+              {session.path.replace(/^\/Users\/[^/]+/, '~')}
+            </span>
+          )}
           {layoutButtons && <div>{layoutButtons}</div>}
           <div className="flex-1" />
+          {activeTab === 'terminal' && sessionId && (
+            <CommandHistoryButton sessionId={sessionId} />
+          )}
           {activeTab === 'terminal' && (
             <button
               title="Refresh terminal output"
@@ -255,5 +267,79 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
         </div>
       )}
     </>
+  );
+}
+
+// ── Command History TOC ─────────────────────────────────────────────────────
+
+function CommandHistoryButton({ sessionId }: { sessionId: string }) {
+  const [entries, setEntries] = useState<CommandEntry[]>([]);
+
+  function refresh() {
+    setEntries(getCommandHistory(sessionId));
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          title="Command history"
+          onClick={refresh}
+          className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
+        >
+          <List size={12} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end">
+        <div style={{ width: 340, maxHeight: 360, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 10, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+              Command History
+            </span>
+            {entries.length > 0 && (
+              <button
+                onClick={() => { clearCommandHistory(sessionId); setEntries([]); }}
+                style={{ fontSize: 9, color: 'var(--muted-foreground)', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, textDecoration: 'underline' }}
+              >
+                clear
+              </button>
+            )}
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {entries.length === 0 ? (
+              <div style={{ padding: '16px 10px', textAlign: 'center', fontSize: 11, color: 'var(--muted-foreground)', opacity: 0.5 }}>
+                No commands recorded yet
+              </div>
+            ) : (
+              [...entries].reverse().map((entry, i) => (
+                <button
+                  key={`${entry.ts}-${i}`}
+                  onClick={() => activeTerminalScrollToLine.current(entry.line)}
+                  style={{
+                    display: 'flex', alignItems: 'baseline', gap: 8,
+                    width: '100%', textAlign: 'left', padding: '5px 10px',
+                    background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
+                    cursor: 'pointer', fontSize: 11, color: 'var(--foreground)',
+                  }}
+                  className="hover:bg-white/5"
+                >
+                  <span style={{
+                    fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                    fontWeight: 500, flex: 1,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {entry.cmd}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--muted-foreground)', flexShrink: 0, opacity: 0.5 }}>
+                    {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

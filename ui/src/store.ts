@@ -64,9 +64,51 @@ export interface StoreState {
 // Debounce timers kept outside store state (no re-renders on timer changes)
 const _busyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-// Active terminal send/refresh — updated by TerminalCell when it becomes active
+// Active terminal send/refresh/scroll — updated by TerminalCell when it becomes active
 export const activeTerminalSend    = { current: (_msg: Record<string, unknown>) => {} };
 export const activeTerminalRefresh = { current: () => {} };
+export const activeTerminalScrollToLine = { current: (_line: number) => {} };
+
+// ── Command history ─────────────────────────────────────────────────────────
+export interface CommandEntry {
+  cmd: string;
+  line: number;   // xterm buffer absolute line (baseY + cursorY)
+  ts: number;     // Date.now()
+}
+
+const CMD_HISTORY_KEY = 'vipershell:cmd-history';
+const MAX_HISTORY = 200;
+
+function loadCommandHistory(): Record<string, CommandEntry[]> {
+  try {
+    return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '{}');
+  } catch { return {}; }
+}
+
+function saveCommandHistory(h: Record<string, CommandEntry[]>) {
+  try { localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(h)); } catch { /* quota */ }
+}
+
+const _commandHistory: Record<string, CommandEntry[]> = loadCommandHistory();
+
+export function getCommandHistory(sessionId: string): CommandEntry[] {
+  return _commandHistory[sessionId] ?? [];
+}
+
+export function addCommandEntry(sessionId: string, cmd: string, line: number) {
+  if (!cmd.trim()) return;
+  const list = _commandHistory[sessionId] ?? [];
+  list.push({ cmd: cmd.trim(), line, ts: Date.now() });
+  // Cap history
+  if (list.length > MAX_HISTORY) list.splice(0, list.length - MAX_HISTORY);
+  _commandHistory[sessionId] = list;
+  saveCommandHistory(_commandHistory);
+}
+
+export function clearCommandHistory(sessionId: string) {
+  delete _commandHistory[sessionId];
+  saveCommandHistory(_commandHistory);
+}
 
 // Pre-load split session IDs from localStorage so they're hidden before first render
 function loadSplitSessionIds(): Set<string> {

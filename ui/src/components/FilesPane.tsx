@@ -130,13 +130,15 @@ const GIT_LABELS: Record<string, string> = {
 
 interface EntryProps {
   entry: Entry;
+  index?: number;
   selected: string | null;
+  focused?: boolean;
   onSelect: (path: string) => void;
   onNavigate: (path: string) => void;
   gitStatus: Record<string, string> | null;
 }
 
-function EntryRow({ entry, selected, onSelect, onNavigate, gitStatus }: EntryProps) {
+function EntryRow({ entry, index, selected, focused, onSelect, onNavigate, gitStatus }: EntryProps) {
   const Icon = getIcon(entry.name, entry.isDir);
   const active = selected === entry.path;
   const status = gitStatus?.[entry.path] ?? null;
@@ -152,11 +154,13 @@ function EntryRow({ entry, selected, onSelect, onNavigate, gitStatus }: EntryPro
   const iconColor = gitColor ?? (entry.isDir ? '#79c0ff' : '#8b949e');
   return (
     <div
+      data-entry-idx={index}
       onClick={() => entry.isDir ? onNavigate(entry.path) : onSelect(entry.path)}
       style={{
         display: 'flex', alignItems: 'center', gap: 7,
         padding: '4px 10px', cursor: 'pointer', userSelect: 'none',
-        background: active ? '#1f3a56' : 'transparent',
+        background: active ? '#1f3a56' : focused ? '#1a2332' : 'transparent',
+        borderLeft: focused ? '2px solid #58a6ff' : '2px solid transparent',
         borderBottom: '1px solid #161b22',
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!active) e.currentTarget.style.background = '#161b22'; }}
@@ -538,6 +542,9 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
     }
   }, [sessionId]);
 
+  const [focusedResult, setFocusedResult] = useState(-1);
+  const flatResults = results; // already flat
+
   // Debounced search
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleInput = (val: string) => {
@@ -573,7 +580,16 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
             ref={inputRef}
             value={query}
             onChange={e => handleInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); setResults([]); setSearched(false); } }}
+            onKeyDown={e => {
+              if (e.key === 'Escape') { setQuery(''); setResults([]); setSearched(false); setFocusedResult(-1); }
+              else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedResult(prev => Math.min(prev + 1, flatResults.length - 1)); }
+              else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedResult(prev => Math.max(prev - 1, -1)); }
+              else if (e.key === 'Enter' && focusedResult >= 0 && flatResults[focusedResult]) {
+                e.preventDefault();
+                const r = flatResults[focusedResult]!;
+                onOpenFile(cwd ? `${cwd}/${r.file}` : r.file, query, r.line);
+              }
+            }}
             placeholder="Search in files\u2026"
             spellCheck={false}
             style={{
@@ -640,7 +656,9 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
             No results found
           </div>
         )}
-        {Object.entries(grouped).map(([file, matches]) => (
+        {(() => {
+          let globalIdx = 0;
+          return Object.entries(grouped).map(([file, matches]) => (
           <div key={file}>
             <div style={{
               padding: '4px 10px', fontSize: 11, color: '#c9d1d9',
@@ -653,18 +671,22 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file}</span>
               <span style={{ color: '#484f58', flexShrink: 0 }}>{matches.length}</span>
             </div>
-            {matches.map((r, i) => (
+            {matches.map((r, i) => {
+              const idx = globalIdx++;
+              return (
               <SearchResult
                 key={`${r.line}-${i}`}
                 result={r}
                 cwd={cwd}
                 query={query}
-                isActive={false}
+                isActive={idx === focusedResult}
                 onClick={() => onOpenFile(cwd ? `${cwd}/${r.file}` : r.file, query, r.line)}
               />
-            ))}
+              );
+            })}
           </div>
-        ))}
+          ));
+        })()}
       </div>
     </div>
   );
@@ -698,6 +720,8 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const [createName,   setCreateName]   = useState('');
   const createInputRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
+  const [focusedEntry, setFocusedEntry] = useState(-1);
+  const fileListRef = useRef<HTMLDivElement>(null);
 
   const browse = useCallback(async (targetPath: string | null, { autoReadme = false }: { autoReadme?: boolean } = {}) => {
     setLoading(true);
@@ -849,6 +873,50 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     if (deletedFile) onFileSelect?.(null as any);
   }, [selectedFile, dir, browse, onFileSelect]);
 
+  // Reset focused entry when entries change
+  useEffect(() => { setFocusedEntry(-1); }, [entries]);
+
+  const handleFileListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if (entries.length === 0) return;
+
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocusedEntry(prev => {
+        const next = Math.min(prev + 1, entries.length - 1);
+        fileListRef.current?.querySelector(`[data-entry-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+        return next;
+      });
+      return;
+    }
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocusedEntry(prev => {
+        const next = Math.max(prev - 1, 0);
+        fileListRef.current?.querySelector(`[data-entry-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+        return next;
+      });
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const entry = entries[focusedEntry];
+      if (!entry) return;
+      if (entry.isDir) browse(entry.path);
+      else selectFile(entry.path);
+      return;
+    }
+    if (e.key === 'Backspace') {
+      // Go up one directory
+      if (dir && cwd && dir !== cwd) {
+        e.preventDefault();
+        const parent = dir.split('/').slice(0, -1).join('/') || '/';
+        browse(parent);
+      }
+      return;
+    }
+  }, [entries, focusedEntry, browse, dir, cwd, selectFile]);
+
   const breadcrumbs = dir && cwd
     ? (dir.startsWith(cwd) ? dir.slice(cwd.length) : dir).split('/').filter(Boolean)
     : [];
@@ -988,12 +1056,17 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       <div className="hidden md:flex flex-col flex-1 min-h-0">
         {toolbar(false)}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div style={{ width: sidebarWidth, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
+          <div
+            ref={fileListRef}
+            tabIndex={0}
+            onKeyDown={handleFileListKeyDown}
+            style={{ width: sidebarWidth, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', position: 'relative', outline: 'none' }}
+          >
             {createInput}
             {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
             {!loading && entries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
-            {entries.map(e => (
-              <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
+            {entries.map((e, i) => (
+              <EntryRow key={e.path} entry={e} index={i} selected={selectedFile} focused={i === focusedEntry} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
             ))}
             {/* Resize handle */}
             <div
