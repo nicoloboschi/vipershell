@@ -198,7 +198,11 @@
 #sheet-session-list .session-close { opacity: 1; }
 
 /* ── Terminal ───────────────────────────────────────────────────────────────── */
-.terminal-pane { position: absolute; inset: 0; padding: 8px; overflow: hidden; }
+@keyframes terminal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.terminal-pane { position: absolute; inset: 0; padding: 8px; overflow: hidden; animation: terminal-fade-in 0.3s ease-out; }
 .terminal-pane .xterm-viewport { overflow-y: scroll !important; overscroll-behavior: contain; touch-action: pan-y; }
 /* touch-action: none lets JS handlers (and xterm's own) fully control touch on the canvas overlay.
    pan-y here would be ignored anyway: xterm-screen is a *sibling* of xterm-viewport so the browser

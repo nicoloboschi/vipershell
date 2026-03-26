@@ -158,11 +158,13 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
 
           case 'create_session': {
             const path = msg.path as string | undefined;
+            // Send optimistic response immediately so UI can update fast
             const sessionId = await bridge.createSession(path);
-            // Refresh session list
-            const sessions = await bridge.listSessions();
-            send({ type: 'sessions', sessions });
-            send({ type: 'session_created', session_id: sessionId });
+            send({ type: 'session_created', session_id: sessionId, path: path || null });
+            // Then refresh full session list in background
+            bridge.listSessions().then(sessions => {
+              send({ type: 'sessions', sessions });
+            });
             break;
           }
 

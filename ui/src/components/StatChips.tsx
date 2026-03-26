@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GitBranch, GitCommitHorizontal, ArrowUp, ArrowDown, Github, GitFork } from 'lucide-react';
+import { GitBranch, GitCommitHorizontal, ArrowUp, ArrowDown, Github, GitFork, Loader2 } from 'lucide-react';
 import { useStats } from '../hooks/useStats';
 import { useGit, useGithubPR, useWorktrees } from '../hooks/useGit';
 import useStore from '../store';
@@ -493,7 +493,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
             }}
             className="hover:bg-white/5 hover:text-foreground"
           >
-            <span style={{ fontSize: 14, lineHeight: 1, marginTop: -1 }}>+</span>
+            {wtLoading ? <Loader2 size={10} className="animate-spin" /> : <span style={{ fontSize: 14, lineHeight: 1, marginTop: -1 }}>+</span>}
           </button>
         </div>
         {worktrees === null && (

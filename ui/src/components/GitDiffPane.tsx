@@ -418,17 +418,20 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
   useEffect(() => { if (mode !== 'commits' || selectedCommit) load(); }, [load]); // eslint-disable-line
   useEffect(() => { if (files?.length) setFocusedFileIdx(0); }, [files]);
 
+  // Auto-focus for keyboard navigation when the pane mounts
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
+
   const jumpToFile = (path: string): void => {
     const el = diffRef.current?.querySelector(`[data-file="${CSS.escape(path)}"]`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+  const navigateFile = useCallback((direction: 'up' | 'down') => {
     if (!files?.length) return;
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    e.preventDefault();
     setFocusedFileIdx(idx => {
-      const next = e.key === 'ArrowDown'
+      const next = direction === 'down'
         ? Math.min(idx + 1, files.length - 1)
         : Math.max(idx - 1, 0);
       const f = files[next]!;
@@ -438,6 +441,69 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
       return next;
     });
   }, [files]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Don't capture when typing in the base branch input
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+
+    // File navigation: arrows or j/k
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      navigateFile('down');
+      return;
+    }
+    if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      navigateFile('up');
+      return;
+    }
+
+    // Scroll the diff content area
+    const scrollEl = diffRef.current;
+    if (!scrollEl) return;
+    const scrollAmount = 200;
+
+    if (e.key === ' ') {
+      e.preventDefault();
+      scrollEl.scrollBy({ top: e.shiftKey ? -scrollAmount : scrollAmount, behavior: 'smooth' });
+      return;
+    }
+
+    // Page up/down
+    if (e.key === 'PageDown') {
+      e.preventDefault();
+      scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.8, behavior: 'smooth' });
+      return;
+    }
+    if (e.key === 'PageUp') {
+      e.preventDefault();
+      scrollEl.scrollBy({ top: -scrollEl.clientHeight * 0.8, behavior: 'smooth' });
+      return;
+    }
+
+    // Home/End — first/last file
+    if (e.key === 'Home') {
+      e.preventDefault();
+      setFocusedFileIdx(0);
+      scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault();
+      if (files?.length) {
+        setFocusedFileIdx(files.length - 1);
+        scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
+      }
+      return;
+    }
+
+    // Refresh
+    if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      load();
+      return;
+    }
+  }, [files, navigateFile, load]);
 
   const showSidebar = files && files.length > 0;
   const totalAdd = files?.reduce((s, f) => s + f.additions, 0) ?? 0;

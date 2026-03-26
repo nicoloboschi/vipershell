@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Upload } from 'lucide-react';
 import useStore, { activeTerminalSend, activeTerminalRefresh } from '../store';
 import { wsUrl } from '../serverUrl';
 
@@ -41,6 +41,12 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   const pendingResetRef = useRef(false);
   const mountedRef = useRef(true);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCountRef = useRef(0);
+
+  // Output batching — accumulate chunks and flush once per animation frame
+  const outputBufRef = useRef('');
+  const flushRafRef = useRef(0);
 
   // Create terminal once
   useEffect(() => {
@@ -175,19 +181,30 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             term.reset();
           }
           const filtered = filterAltScreen(msg.data);
-          term.write(filtered);
-          // Mark unseen if this session is not currently active
-          useStore.getState().markUnseen(sessionId);
-          // Extract URLs from output and store them
-          const plain = stripAnsi(filtered);
-          const urls = plain.match(URL_RE);
-          if (urls) {
-            const store = useStore.getState();
-            for (const url of urls) {
-              const clean = url.replace(/[.,;:!?)'"}\]]+$/, '');
-              store.addSessionUrl(sessionId, clean);
-            }
+          // Accumulate output and flush once per animation frame for smoother rendering
+          outputBufRef.current += filtered;
+          if (!flushRafRef.current) {
+            flushRafRef.current = requestAnimationFrame(() => {
+              flushRafRef.current = 0;
+              const batch = outputBufRef.current;
+              outputBufRef.current = '';
+              const t = termRef.current;
+              if (!t || !batch) return;
+              t.write(batch);
+              // Extract URLs from the batched output
+              const plain = stripAnsi(batch);
+              const urls = plain.match(URL_RE);
+              if (urls) {
+                const store = useStore.getState();
+                for (const url of urls) {
+                  const clean = url.replace(/[.,;:!?)'"}\]]+$/, '');
+                  store.addSessionUrl(sessionId, clean);
+                }
+              }
+            });
           }
+          // Mark unseen immediately (cheap, no rendering)
+          useStore.getState().markUnseen(sessionId);
         }
       };
 
@@ -206,6 +223,8 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       mountedRef.current = false;
       if (retryTimer) clearTimeout(retryTimer);
       if (ws) { ws.onclose = null; ws.close(); }
+      if (flushRafRef.current) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = 0; }
+      outputBufRef.current = '';
     };
   }, [sessionId]);
 
@@ -386,6 +405,41 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     };
   }, []);
 
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    dragCountRef.current = 0;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    // Get session CWD
+    let cwd = '/tmp';
+    try {
+      const res = await fetch(`/api/fs/${encodeURIComponent(sessionId)}/browse`);
+      const data = await res.json();
+      if (data.cwd) cwd = data.cwd;
+    } catch { /* fallback to /tmp */ }
+
+    // Upload each file and type the path
+    const paths: string[] = [];
+    for (const file of files) {
+      try {
+        const res = await fetch(`/api/fs/upload?dir=${encodeURIComponent(cwd)}&name=${encodeURIComponent(file.name)}`, {
+          method: 'POST',
+          body: file,
+        });
+        const { ok, path } = await res.json();
+        if (ok && path) paths.push(path);
+      } catch { /* skip failed uploads */ }
+    }
+
+    // Type the paths into the terminal (space-separated, shell-escaped)
+    if (paths.length > 0) {
+      const escaped = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+      sendRef.current({ type: 'input', data: escaped });
+    }
+  }
+
   return (
     <div
       className="flex-1 min-h-0 min-w-0"
@@ -393,15 +447,35 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
         position: 'relative',
         display: 'flex', flexDirection: 'column',
         background: '#0d1117', overflow: 'hidden',
-        outline: isActive ? '1px solid var(--primary)' : '1px solid transparent',
+        outline: dragOver ? '2px solid var(--primary)' : isActive ? '1px solid var(--primary)' : '1px solid transparent',
         outlineOffset: -1,
       }}
       onClick={onActivate}
+      onDragEnter={(e) => { e.preventDefault(); dragCountRef.current++; setDragOver(true); }}
+      onDragOver={(e) => { e.preventDefault(); }}
+      onDragLeave={() => { dragCountRef.current--; if (dragCountRef.current <= 0) { setDragOver(false); dragCountRef.current = 0; } }}
+      onDrop={handleDrop}
     >
       <div
         ref={containerRef}
-        style={{ position: 'absolute', inset: 0, padding: 8, overflow: 'hidden' }}
+        className="terminal-pane"
       />
+      {dragOver && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 20,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(13,17,23,0.85)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+            color: 'var(--primary)', fontSize: 13, fontWeight: 600,
+          }}>
+            <Upload size={28} />
+            Drop to upload
+          </div>
+        </div>
+      )}
       {showScrollBottom && (
         <button
           onClick={(e) => {

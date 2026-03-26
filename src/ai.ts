@@ -35,6 +35,15 @@ function runWithStdin(cmd: string, args: string[], input: string, timeoutMs = 30
     child.stdin.end();
   });
 }
+/** Fast non-crypto hash for content change detection */
+function simpleHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
+}
+
 const CONFIG_PATH = join(homedir(), '.config', 'vipershell', 'config.json');
 
 export type AIProvider = 'claude-code' | 'codex';
@@ -58,6 +67,8 @@ export class AIService {
   private namingTimer: NodeJS.Timeout | null = null;
   /** Track which sessions were recently named to avoid hammering the LLM */
   private lastNamed = new Map<string, number>();
+  /** Hash of terminal content used for the last naming — skip if unchanged */
+  private lastContentHash = new Map<string, string>();
   private inFlight = new Set<string>();
 
   getConfig(): AIConfig {
@@ -162,6 +173,13 @@ export class AIService {
       // Take last 2000 chars to keep prompt small
       const snippet = text.length > 2000 ? text.slice(-2000) : text;
 
+      // Skip if terminal content hasn't changed since last naming
+      const contentHash = simpleHash(snippet);
+      if (this.lastContentHash.get(sessionId) === contentHash) {
+        logger.debug(`AI naming ${sessionId}: content unchanged, skipping`);
+        return;
+      }
+
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this terminal session. Use lowercase, no title case, no emojis, no quotes. Just output the name, nothing else.\n\nTerminal output:\n${snippet}`;
 
       const cli = provider === 'claude-code' ? 'claude' : 'codex';
@@ -208,6 +226,7 @@ export class AIService {
       // Disable tmux automatic-rename so it doesn't overwrite our name
       await execAsync(`tmux set-option -t '${sessionId.replace(/'/g, "'\\''")}' automatic-rename off 2>/dev/null`).catch(() => {});
       await this.bridge!.renameSession(sessionId, name);
+      this.lastContentHash.set(sessionId, contentHash);
       logger.info(`AI renamed ${sessionId} → "${name}"`);
     } catch (e) {
       logger.debug(`AI naming failed for ${sessionId}: ${e}`);

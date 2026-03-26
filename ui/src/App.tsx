@@ -48,8 +48,19 @@ export default function App() {
         break;
       }
       case 'session_created': {
-        // Don't switch to the session if it's a terminal split
         const newId = msg.session_id as string;
+        const path = msg.path as string | null;
+        // Optimistically add session to the store so it appears in sidebar immediately
+        if (!store.sessionMap[newId]) {
+          const optimistic = {
+            id: newId,
+            name: path ? path.split('/').pop() || 'terminal' : 'terminal',
+            path: path || undefined,
+            last_activity: Date.now() / 1000,
+          };
+          store.renderSessions([...Object.values(store.sessionMap), optimistic]);
+        }
+        // Don't switch to the session if it's a terminal split
         if (!store.splitSessionIds.has(newId)) {
           connectSession(newId);
         }
