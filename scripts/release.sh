@@ -35,7 +35,9 @@ VERSION=$(node -p "require('./package.json').version")
 echo "Publishing vipershell@${VERSION}"
 
 # ── Publish ──
-NPM_CONFIG_//registry.npmjs.org/:_authToken="${NPM_TOKEN}" npm publish --access public
+echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+trap 'rm -f .npmrc' EXIT
+npm publish --access public
 
 echo ""
 echo "Published vipershell@${VERSION}"

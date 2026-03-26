@@ -6,3 +6,4 @@ ui/node_modules/
 *.d.ts
 .env
 .env.*
+.npmrc
