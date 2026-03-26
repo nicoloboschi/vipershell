@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import { relativeTime } from '../utils';
@@ -14,16 +14,24 @@ export default function SessionItem({ session, isActive, onConnect }: SessionIte
   const unseen      = useStore(s => s.sessionHasUnseen[session.id] ?? false);
   const lastEvent   = useStore(s => s.sessionLastEvent[session.id] ?? null);
   const lastCommand = useStore(s => s.sessionLastCommand[session.id] ?? null);
+  const elRef = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => tick(n => n + 1), 5_000);
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (isActive && elRef.current) {
+      elRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isActive]);
+
   const time = relativeTime(lastEvent);
 
   return (
     <div
+      ref={elRef}
       className={['session-item', isActive ? 'active' : '', unseen ? 'unseen' : ''].filter(Boolean).join(' ')}
       data-session-id={session.id}
       onClick={() => onConnect(session.id)}

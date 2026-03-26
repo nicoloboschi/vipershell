@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -454,49 +454,77 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
     containerRef.current?.focus();
   }, []);
 
+  // Sorted file order (matching sidebar grouping) — maps visual position to original index
+  const sortedFileOrder = useMemo(() => {
+    if (!files?.length) return [];
+    const entries = files.map((file, i) => {
+      const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
+      const parts = path.split('/');
+      const name = parts.pop()!;
+      const dir = parts.join('/') || '.';
+      return { index: i, dir, name };
+    });
+    entries.sort((a, b) => a.dir.localeCompare(b.dir) || a.name.localeCompare(b.name));
+    return entries.map(e => e.index);
+  }, [files]);
+
   const jumpToFile = (path: string): void => {
     const el = diffRef.current?.querySelector(`[data-file="${CSS.escape(path)}"]`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const navigateFile = useCallback((direction: 'up' | 'down') => {
-    if (!files?.length) return;
+  const navigateFile = useCallback((direction: 'prev' | 'next') => {
+    if (!files?.length || !sortedFileOrder.length) return;
     setFocusedFileIdx(idx => {
-      const next = direction === 'down'
-        ? Math.min(idx + 1, files.length - 1)
-        : Math.max(idx - 1, 0);
+      const currentPos = sortedFileOrder.indexOf(idx);
+      const pos = currentPos === -1 ? 0 : currentPos;
+      const nextPos = direction === 'next'
+        ? Math.min(pos + 1, sortedFileOrder.length - 1)
+        : Math.max(pos - 1, 0);
+      const next = sortedFileOrder[nextPos]!;
       const f = files[next]!;
       const path = f.isDeleted ? f.oldPath : (f.newPath || f.oldPath);
       const el = diffRef.current?.querySelector(`[data-file="${CSS.escape(path)}"]`);
       el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return next;
     });
-  }, [files]);
+  }, [files, sortedFileOrder]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     // Don't capture when typing in the base branch input
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
-    // File navigation: arrows or j/k
+    // File navigation: left/right arrows or h/l
+    if (e.key === 'ArrowRight' || e.key === 'l') {
+      e.preventDefault();
+      navigateFile('next');
+      return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'h') {
+      e.preventDefault();
+      navigateFile('prev');
+      return;
+    }
+
+    // Scroll the diff content area: up/down arrows or j/k
+    const scrollEl = diffRef.current;
+    if (!scrollEl) return;
+    const scrollAmount = 120;
+
     if (e.key === 'ArrowDown' || e.key === 'j') {
       e.preventDefault();
-      navigateFile('down');
+      scrollEl.scrollBy({ top: scrollAmount, behavior: 'smooth' });
       return;
     }
     if (e.key === 'ArrowUp' || e.key === 'k') {
       e.preventDefault();
-      navigateFile('up');
+      scrollEl.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
       return;
     }
 
-    // Scroll the diff content area
-    const scrollEl = diffRef.current;
-    if (!scrollEl) return;
-    const scrollAmount = 200;
-
     if (e.key === ' ') {
       e.preventDefault();
-      scrollEl.scrollBy({ top: e.shiftKey ? -scrollAmount : scrollAmount, behavior: 'smooth' });
+      scrollEl.scrollBy({ top: e.shiftKey ? -200 : 200, behavior: 'smooth' });
       return;
     }
 
@@ -515,16 +543,14 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
     // Home/End — first/last file
     if (e.key === 'Home') {
       e.preventDefault();
-      setFocusedFileIdx(0);
+      if (sortedFileOrder.length) setFocusedFileIdx(sortedFileOrder[0]!);
       scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     if (e.key === 'End') {
       e.preventDefault();
-      if (files?.length) {
-        setFocusedFileIdx(files.length - 1);
-        scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
-      }
+      if (sortedFileOrder.length) setFocusedFileIdx(sortedFileOrder[sortedFileOrder.length - 1]!);
+      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
       return;
     }
 
@@ -534,7 +560,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
       load();
       return;
     }
-  }, [files, navigateFile, load]);
+  }, [files, sortedFileOrder, navigateFile, load]);
 
   const showSidebar = files && files.length > 0;
   const totalAdd = files?.reduce((s, f) => s + f.additions, 0) ?? 0;

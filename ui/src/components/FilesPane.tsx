@@ -506,6 +506,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
   const [glob, setGlob]         = useState('');
   const [showGlob, setShowGlob] = useState(false);
   const [results, setResults]   = useState<SearchResultData[]>([]);
+  const [fileResults, setFileResults] = useState<string[]>([]);
   const [cwd, setCwd]           = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched]   = useState(false);
@@ -520,7 +521,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
   }
 
   const doSearch = useCallback(async (q: string, g: string) => {
-    if (!q.trim()) { setResults([]); setSearched(false); return; }
+    if (!q.trim()) { setResults([]); setFileResults([]); setSearched(false); return; }
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -529,14 +530,19 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
     try {
       const params = new URLSearchParams({ q: q.trim() });
       if (g.trim()) params.set('glob', g.trim());
-      const res = await fetch(`/api/fs/${encodeURIComponent(sessionId!)}/search?${params}`, { signal: controller.signal });
-      const data = await res.json();
+      // Fetch content search and filename search in parallel
+      const [contentRes, fileRes] = await Promise.all([
+        fetch(`/api/fs/${encodeURIComponent(sessionId!)}/search?${params}`, { signal: controller.signal }),
+        fetch(`/api/fs/${encodeURIComponent(sessionId!)}/find?q=${encodeURIComponent(q.trim())}`, { signal: controller.signal }),
+      ]);
+      const [contentData, fileData] = await Promise.all([contentRes.json(), fileRes.json()]);
       if (!controller.signal.aborted) {
-        setResults(data.results ?? []);
-        setCwd(data.cwd ?? null);
+        setResults(contentData.results ?? []);
+        setFileResults(fileData.results ?? []);
+        setCwd(contentData.cwd ?? fileData.cwd ?? null);
       }
     } catch (e: any) {
-      if (e.name !== 'AbortError') setResults([]);
+      if (e.name !== 'AbortError') { setResults([]); setFileResults([]); }
     } finally {
       if (!controller.signal.aborted) setSearching(false);
     }
@@ -561,7 +567,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
 
   // Reset when session changes
   useEffect(() => {
-    setQuery(''); setGlob(''); setResults([]); setSearched(false);
+    setQuery(''); setGlob(''); setResults([]); setFileResults([]); setSearched(false);
     inputRef.current?.focus();
   }, [sessionId]);
 
@@ -638,7 +644,13 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
             {searching ? (
               <span>Searching\u2026</span>
             ) : (
-              <span>{results.length} result{results.length !== 1 ? 's' : ''} in {fileCount} file{fileCount !== 1 ? 's' : ''}{results.length >= 500 ? ' (limit reached)' : ''}</span>
+              <span>
+                {fileResults.length > 0 && `${fileResults.length} file${fileResults.length !== 1 ? 's' : ''}`}
+                {fileResults.length > 0 && results.length > 0 && ' · '}
+                {results.length > 0 && `${results.length} match${results.length !== 1 ? 'es' : ''} in ${fileCount} file${fileCount !== 1 ? 's' : ''}`}
+                {fileResults.length === 0 && results.length === 0 && 'No results'}
+                {results.length >= 500 ? ' (limit reached)' : ''}
+              </span>
             )}
           </div>
         )}
@@ -648,12 +660,59 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {!searched && (
           <div style={{ padding: 20, textAlign: 'center', color: '#484f58', fontSize: 12 }}>
-            Type to search across files
+            Type to search file names and contents
           </div>
         )}
-        {searched && !searching && results.length === 0 && (
+        {searched && !searching && results.length === 0 && fileResults.length === 0 && (
           <div style={{ padding: 20, textAlign: 'center', color: '#484f58', fontSize: 12 }}>
             No results found
+          </div>
+        )}
+        {/* File name matches */}
+        {fileResults.length > 0 && (
+          <div>
+            <div style={{
+              padding: '4px 10px', fontSize: 10, color: '#6e7681',
+              background: '#161b22', borderBottom: '1px solid #21262d',
+              textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
+              position: 'sticky', top: 0, zIndex: 2,
+            }}>
+              Files
+            </div>
+            {fileResults.map(file => (
+              <div
+                key={file}
+                onClick={() => onOpenFile(cwd ? `${cwd}/${file}` : file)}
+                style={{
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  borderBottom: '1px solid #161b22',
+                }}
+                onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#161b22'}
+                onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = 'transparent'}
+              >
+                <File size={11} style={{ color: '#8b949e', flexShrink: 0 }} />
+                <span style={{
+                  fontSize: 11, color: '#79c0ff',
+                  fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {file}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Content matches */}
+        {results.length > 0 && fileResults.length > 0 && (
+          <div style={{
+            padding: '4px 10px', fontSize: 10, color: '#6e7681',
+            background: '#161b22', borderBottom: '1px solid #21262d',
+            textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
+            position: 'sticky', top: 0, zIndex: 2,
+          }}>
+            Content
           </div>
         )}
         {(() => {
@@ -665,7 +724,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
               fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
               background: '#161b22', borderBottom: '1px solid #21262d',
               display: 'flex', alignItems: 'center', gap: 6,
-              position: 'sticky', top: 0, zIndex: 1,
+              position: 'sticky', top: fileResults.length > 0 ? 22 : 0, zIndex: 1,
             }}>
               <FileCode size={11} style={{ color: '#8b949e', flexShrink: 0 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file}</span>
@@ -718,7 +777,10 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const [uploadMsg,    setUploadMsg]    = useState<string | null>(null);
   const [creating,     setCreating]     = useState<'file' | 'folder' | null>(null);
   const [createName,   setCreateName]   = useState('');
+  const [fileFilter,   setFileFilter]   = useState('');
+  const [showFileFilter, setShowFileFilter] = useState(false);
   const createInputRef = useRef<HTMLInputElement>(null);
+  const fileFilterRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
   const [focusedEntry, setFocusedEntry] = useState(-1);
   const fileListRef = useRef<HTMLDivElement>(null);
@@ -873,17 +935,22 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     if (deletedFile) onFileSelect?.(null as any);
   }, [selectedFile, dir, browse, onFileSelect]);
 
-  // Reset focused entry when entries change
-  useEffect(() => { setFocusedEntry(-1); }, [entries]);
+  // Reset focused entry and filter when entries change
+  useEffect(() => { setFocusedEntry(-1); setFileFilter(''); }, [entries]);
+
+  const filteredEntries = fileFilter
+    ? entries.filter(e => e.name.toLowerCase().includes(fileFilter.toLowerCase()))
+    : entries;
 
   const handleFileListKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
-    if (entries.length === 0) return;
+    if (filteredEntries.length === 0) return;
 
+    // File navigation: up/down or j/k to move through entries
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault();
       setFocusedEntry(prev => {
-        const next = Math.min(prev + 1, entries.length - 1);
+        const next = Math.min(prev + 1, filteredEntries.length - 1);
         fileListRef.current?.querySelector(`[data-entry-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
         return next;
       });
@@ -898,16 +965,46 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       });
       return;
     }
+    // Left/Right: navigate between files (skip dirs), open on right
+    if (e.key === 'ArrowRight' || e.key === 'l') {
+      e.preventDefault();
+      const entry = filteredEntries[focusedEntry];
+      if (entry?.isDir) { browse(entry.path); return; }
+      for (let i = focusedEntry + 1; i < filteredEntries.length; i++) {
+        if (!filteredEntries[i]!.isDir) {
+          setFocusedEntry(i);
+          selectFile(filteredEntries[i]!.path);
+          fileListRef.current?.querySelector(`[data-entry-idx="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      }
+      return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'h') {
+      e.preventDefault();
+      for (let i = focusedEntry - 1; i >= 0; i--) {
+        if (!filteredEntries[i]!.isDir) {
+          setFocusedEntry(i);
+          selectFile(filteredEntries[i]!.path);
+          fileListRef.current?.querySelector(`[data-entry-idx="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      }
+      if (dir && cwd && dir !== cwd) {
+        const parent = dir.split('/').slice(0, -1).join('/') || '/';
+        browse(parent);
+      }
+      return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
-      const entry = entries[focusedEntry];
+      const entry = filteredEntries[focusedEntry];
       if (!entry) return;
       if (entry.isDir) browse(entry.path);
       else selectFile(entry.path);
       return;
     }
     if (e.key === 'Backspace') {
-      // Go up one directory
       if (dir && cwd && dir !== cwd) {
         e.preventDefault();
         const parent = dir.split('/').slice(0, -1).join('/') || '/';
@@ -915,7 +1012,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       }
       return;
     }
-  }, [entries, focusedEntry, browse, dir, cwd, selectFile]);
+  }, [filteredEntries, focusedEntry, browse, dir, cwd, selectFile]);
 
   const breadcrumbs = dir && cwd
     ? (dir.startsWith(cwd) ? dir.slice(cwd.length) : dir).split('/').filter(Boolean)
@@ -950,6 +1047,13 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       </div>
       {!showBack && (
         <>
+          <button
+            onClick={() => { setShowFileFilter(f => { if (!f) setTimeout(() => fileFilterRef.current?.focus(), 0); return !f; }); setFileFilter(''); }}
+            title="Filter files"
+            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: showFileFilter ? '#58a6ff' : '#6e7681', flexShrink: 0, padding: 3 }}
+          >
+            <Search size={12} />
+          </button>
           <button onClick={() => startCreate('file')} title="New file" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', flexShrink: 0, padding: 3 }}>
             <FilePlus size={15} />
           </button>
@@ -961,6 +1065,41 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           </button>
         </>
       )}
+    </div>
+  );
+
+  const fileFilterInput = showFileFilter && (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+      background: '#0d1117', borderBottom: '1px solid #21262d',
+    }}>
+      <Search size={11} style={{ color: '#6e7681', flexShrink: 0 }} />
+      <input
+        ref={fileFilterRef}
+        value={fileFilter}
+        onChange={e => { setFileFilter(e.target.value); setFocusedEntry(-1); }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') { setShowFileFilter(false); setFileFilter(''); }
+        }}
+        placeholder="Filter files\u2026"
+        spellCheck={false}
+        style={{
+          flex: 1, border: 'none', outline: 'none', background: 'transparent',
+          color: '#c9d1d9', fontSize: 11, padding: 0,
+          fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+        }}
+      />
+      {fileFilter && (
+        <span style={{ fontSize: 10, color: '#6e7681', flexShrink: 0 }}>
+          {filteredEntries.length}/{entries.length}
+        </span>
+      )}
+      <button
+        onClick={() => { setShowFileFilter(false); setFileFilter(''); }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', display: 'flex', padding: 0, flexShrink: 0 }}
+      >
+        <X size={11} />
+      </button>
     </div>
   );
 
@@ -996,10 +1135,11 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     <>
       {toolbar(false)}
       <div style={{ flex: 1, overflowY: 'auto' }}>
+        {fileFilterInput}
         {createInput}
         {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
-        {!loading && entries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
-        {entries.map(e => (
+        {!loading && filteredEntries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>{fileFilter ? 'No matches' : 'Empty directory'}</div>}
+        {filteredEntries.map(e => (
           <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={selectFile} onNavigate={browse} gitStatus={gitStatus} />
         ))}
       </div>
@@ -1062,10 +1202,11 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
             onKeyDown={handleFileListKeyDown}
             style={{ width: sidebarWidth, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', position: 'relative', outline: 'none' }}
           >
+            {fileFilterInput}
             {createInput}
             {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
-            {!loading && entries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>Empty directory</div>}
-            {entries.map((e, i) => (
+            {!loading && filteredEntries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>{fileFilter ? 'No matches' : 'Empty directory'}</div>}
+            {filteredEntries.map((e, i) => (
               <EntryRow key={e.path} entry={e} index={i} selected={selectedFile} focused={i === focusedEntry} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
             ))}
             {/* Resize handle */}

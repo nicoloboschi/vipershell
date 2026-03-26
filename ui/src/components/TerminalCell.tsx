@@ -291,7 +291,10 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       activeTerminalScrollToLine.current = (line: number) => {
         const term = termRef.current;
         if (!term) return;
-        term.scrollToLine(Math.max(0, line - Math.floor(term.rows / 4)));
+        const target = Math.max(0, line - Math.floor(term.rows / 4));
+        const current = term.buffer.active.viewportY;
+        const delta = target - current;
+        if (delta !== 0) term.scrollLines(delta);
       };
     }
   }, [isActive]);

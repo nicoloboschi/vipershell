@@ -1,18 +1,41 @@
-import { Plus, GitBranch } from 'lucide-react';
+import { Plus, GitBranch, GitPullRequest } from 'lucide-react';
 import { tildefy } from '../utils';
 import SessionItem from './SessionItem';
 import useStore, { type Session } from '../store';
 import { Button } from './ui/button';
-import { useGit } from '../hooks/useGit';
+import { useGit, useGithubPR } from '../hooks/useGit';
+
+const PR_STATE_COLORS: Record<string, string> = {
+  OPEN: '#3fb950', MERGED: '#a371f7', CLOSED: '#f85149',
+};
 
 function BranchBadge({ sessionId }: { sessionId: string }) {
   const git = useGit(sessionId);
+  const github = useGithubPR(sessionId);
   if (!git?.branch) return null;
   const color = git.dirty ? '#d29922' : '#3fb950';
+  const pr = github?.prNum ? github : null;
+  const prColor = pr ? (PR_STATE_COLORS[pr.prState ?? ''] ?? '#8b949e') : '';
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, color, fontSize: 9, fontFamily: '"Cascadia Code","JetBrains Mono",ui-monospace,monospace' }}>
-      <GitBranch size={8} strokeWidth={2} />
-      {git.branch}
+    <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, fontSize: 9, fontFamily: '"Cascadia Code","JetBrains Mono",ui-monospace,monospace' }}>
+      <GitBranch size={8} strokeWidth={2} style={{ color }} />
+      <span style={{ color }}>{git.branch}</span>
+      {pr && (
+        <>
+          <span style={{ width: 1, height: 10, background: 'var(--border)', flexShrink: 0 }} />
+          <a
+            href={pr.prUrl ?? '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: 'flex', alignItems: 'center', gap: 2, color: prColor, textDecoration: 'none' }}
+            title={`PR #${pr.prNum} ${pr.prState?.toLowerCase() ?? ''}`}
+          >
+            <GitPullRequest size={8} strokeWidth={2} />
+            <span>#{pr.prNum}</span>
+          </a>
+        </>
+      )}
     </span>
   );
 }

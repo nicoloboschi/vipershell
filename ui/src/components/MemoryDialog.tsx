@@ -127,12 +127,24 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
 
   /* ── Claude Code actions ── */
 
+  async function reloadPluginsInSessions(): Promise<number> {
+    try {
+      const res = await fetch('/api/memory/claude-code-reload-plugins', { method: 'POST' });
+      const { sessions } = await res.json();
+      return sessions ?? 0;
+    } catch { return 0; }
+  }
+
   async function setupClaudeCode() {
     setCcState('loading'); setCcError('');
     try {
       const res = await fetch('/api/memory/claude-code-setup', { method: 'POST' });
       const { ok, error } = await res.json();
-      if (ok) { setCcState('ok'); fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {}); }
+      if (ok) {
+        setCcState('ok');
+        fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {});
+        reloadPluginsInSessions();
+      }
       else { setCcState('error'); setCcError(error || 'Unknown error'); }
     } catch { setCcState('error'); setCcError('Request failed'); }
   }
@@ -142,7 +154,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
     try {
       const res = await fetch(`/api/memory/${endpoint}`, { method: 'POST' });
       const { ok, error } = await res.json();
-      if (ok) { setActionDone(true); fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {}); }
+      if (ok) {
+        setActionDone(true);
+        fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {});
+        reloadPluginsInSessions();
+      }
       else { setActionError(error || 'Unknown error'); }
     } catch { setActionError('Request failed'); }
     setActionLoading(null);
@@ -384,8 +400,8 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                   </p>
                   {actionError && <p className="text-xs text-destructive break-words">{actionError}</p>}
                   {actionDone && (
-                    <p className="text-xs text-yellow-500">
-                      Run <code className="bg-muted px-1 rounded text-[10px]">/reload-plugins</code> in open Claude Code sessions to apply changes.
+                    <p className="text-xs text-green-500">
+                      Done &mdash; reloaded plugins in open Claude Code sessions.
                     </p>
                   )}
                   <div className="flex items-center gap-2 flex-wrap">
@@ -425,8 +441,8 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       {ccState === 'loading' ? 'Installing\u2026' : ccState === 'ok' ? 'Installed & configured' : 'Install Hindsight Plugin'}
                     </Button>
                     {ccState === 'ok' && (
-                      <p className="text-xs text-yellow-500">
-                        Run <code className="bg-muted px-1 rounded text-[10px]">/reload-plugins</code> in open Claude Code sessions to apply changes.
+                      <p className="text-xs text-green-500">
+                        Installed &mdash; reloaded plugins in open Claude Code sessions.
                       </p>
                     )}
                   </div>

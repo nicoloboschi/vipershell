@@ -6,6 +6,10 @@
   "bin": {
     "vipershell": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "ui/dist"
+  ],
   "scripts": {
     "build": "tsc && npm run build:ui",
     "build:ui": "cd ui && npm run build",

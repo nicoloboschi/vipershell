@@ -33,7 +33,14 @@ program
     const server = await createApp(bridge, memory, ai);
 
     server.listen(port, host, () => {
-      logger.info(`vipershell listening on http://${host}:${port}`);
+      const url = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`;
+      console.log('');
+      console.log('  \x1b[1m\x1b[32m\u{1F40D} vipershell\x1b[0m');
+      console.log('');
+      console.log(`  \x1b[2mLocal:\x1b[0m   ${url}`);
+      if (host === '0.0.0.0') console.log(`  \x1b[2mNetwork:\x1b[0m http://0.0.0.0:${port}`);
+      console.log('');
+      logger.info(`vipershell listening on ${url}`);
     });
 
     const shutdown = async () => {

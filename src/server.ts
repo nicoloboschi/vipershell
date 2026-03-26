@@ -146,7 +146,7 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             //    covered by the snapshot) — skip it to avoid duplicates.
             if (isNew) {
               // Give the initial dump a moment to arrive, then discard
-              await new Promise(r => setTimeout(r, 100));
+              await new Promise(r => setTimeout(r, 20));
               pending.length = 0;
             }
             draining = true;

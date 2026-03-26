@@ -429,17 +429,34 @@ export class TmuxBridge {
     } catch { /* no sessions yet — any name is fine */ }
 
     const dirArg = path ? `-c ${JSON.stringify(path)}` : `-c ${JSON.stringify(os.homedir())}`;
-    await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg}`);
-    await execAsync(`tmux set-option -t ${JSON.stringify(name)} status off`);
-    // Give tmux a moment to start
-    await new Promise(r => setTimeout(r, 200));
-    // Return the stable $N session ID, not the name
+    await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg} && tmux set-option -t ${JSON.stringify(name)} status off`);
     const { stdout } = await execAsync(`tmux display-message -t ${JSON.stringify(name)} -p "#{session_id}" 2>/dev/null`);
     return stdout.trim() || name;
   }
 
   async renameSession(sessionId: string, newName: string): Promise<void> {
     await execAsync(`tmux rename-session -t ${sh(sessionId)} ${JSON.stringify(newName)}`);
+  }
+
+  /** Send a slash command to all Claude Code sessions via tmux send-keys. */
+  async injectClaudeCodeCommand(command: string): Promise<string[]> {
+    const sessions = await this.listSessions();
+    const injected: string[] = [];
+    for (const s of sessions) {
+      if (!s.isClaudeCode) continue;
+      try {
+        // Send Escape to dismiss any menu, wait for it to be processed,
+        // then send the command. Without the delay, Esc + / + r forms an escape sequence.
+        await execAsync(`tmux send-keys -t ${sh(s.id)} Escape`);
+        await new Promise(r => setTimeout(r, 100));
+        await execAsync(`tmux send-keys -t ${sh(s.id)} ${sh(command)} Enter`);
+        injected.push(s.id);
+        logger.info(`Injected "${command}" into Claude Code session ${s.id} (${s.name})`);
+      } catch (e) {
+        logger.debug(`Failed to inject into ${s.id}: ${e}`);
+      }
+    }
+    return injected;
   }
 
   async closeSession(sessionId: string): Promise<void> {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GitBranch, GitCommitHorizontal, ArrowUp, ArrowDown, Github, GitFork, Loader2 } from 'lucide-react';
+import { GitBranch, GitCommitHorizontal, GitPullRequest, ArrowUp, ArrowDown, Github, GitFork, Loader2, CircleCheck, CircleX, Clock } from 'lucide-react';
 import { useStats } from '../hooks/useStats';
 import { useGit, useGithubPR, useWorktrees } from '../hooks/useGit';
 import useStore from '../store';
@@ -21,6 +21,10 @@ export interface GitStatus {
 
 export interface GithubPR {
   prUrl?: string;
+  prNum?: number;
+  prState?: 'OPEN' | 'MERGED' | 'CLOSED';
+  prChecks?: 'PASS' | 'FAIL' | 'PENDING' | null;
+  prReviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   repoUrl?: string;
 }
 
@@ -441,6 +445,12 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
           {allPrs.map(pr => {
             const m = pr.url.match(GH_PR_RE);
             const repo = m ? `${m[1]}/${m[2]}` : '';
+            // Show state/checks for the PR that matches the github hook
+            const isHookPr = github?.prNum === pr.num;
+            const prState = isHookPr ? github?.prState : null;
+            const prStateColor = prState === 'MERGED' ? '#a371f7' : prState === 'CLOSED' ? '#f85149' : '#3fb950';
+            const checks = isHookPr ? github?.prChecks : null;
+            const review = isHookPr ? github?.prReviewDecision : null;
             return (
               <a
                 key={pr.url}
@@ -454,12 +464,27 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
                 }}
                 className="hover:bg-white/5"
               >
-                <Github size={11} style={{ color: '#79c0ff', flexShrink: 0 }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#79c0ff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+                <GitPullRequest size={11} style={{ color: prStateColor, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: prStateColor, fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
                   #{pr.num}
                 </span>
+                {prState && (
+                  <span style={{ fontSize: 9, color: prStateColor, textTransform: 'lowercase' }}>
+                    {prState}
+                  </span>
+                )}
+                {checks && (() => {
+                  const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : Clock;
+                  const checkColor = checks === 'PASS' ? '#3fb950' : checks === 'FAIL' ? '#f85149' : '#d29922';
+                  return <CheckIcon size={10} strokeWidth={2.5} style={{ color: checkColor, flexShrink: 0 }} />;
+                })()}
+                {review && (
+                  <span style={{ fontSize: 9, color: review === 'APPROVED' ? '#3fb950' : review === 'CHANGES_REQUESTED' ? '#f85149' : '#d29922' }}>
+                    {review === 'APPROVED' ? 'approved' : review === 'CHANGES_REQUESTED' ? 'changes requested' : 'review needed'}
+                  </span>
+                )}
                 {repo && (
-                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 'auto' }}>
                     {repo}
                   </span>
                 )}
@@ -602,14 +627,22 @@ function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
               {git.dirty && <span style={{ fontSize: 8, color: '#d29922', fontWeight: 700 }}>{'\u25CF'}</span>}
               {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#58a6ff' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
               {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#ff7b72' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
-              {topPr && topPr.num > 0 && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: '#79c0ff' }}>
-                  <Github size={8} strokeWidth={2} />#{topPr.num}
-                  {extraCount > 0 && (
-                    <span style={{ fontSize: 8, color: '#79c0ff', opacity: 0.7 }}>+{extraCount}</span>
-                  )}
-                </span>
-              )}
+              {topPr && topPr.num > 0 && (() => {
+                const prState = github?.prState;
+                const prColor = prState === 'MERGED' ? '#a371f7' : prState === 'CLOSED' ? '#f85149' : '#3fb950';
+                const checks = github?.prChecks;
+                const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : checks === 'PENDING' ? Clock : null;
+                const checkColor = checks === 'PASS' ? '#3fb950' : checks === 'FAIL' ? '#f85149' : '#d29922';
+                return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: prColor }}>
+                    <GitPullRequest size={8} strokeWidth={2} />#{topPr.num}
+                    {CheckIcon && <CheckIcon size={7} strokeWidth={2.5} style={{ color: checkColor }} />}
+                    {extraCount > 0 && (
+                      <span style={{ fontSize: 8, opacity: 0.7 }}>+{extraCount}</span>
+                    )}
+                  </span>
+                );
+              })()}
             </span>
           </button>
         </PopoverTrigger>

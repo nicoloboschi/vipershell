@@ -19,6 +19,10 @@ export interface Worktree {
 
 export interface GithubPR {
   prUrl?: string;
+  prNum?: number;
+  prState?: 'OPEN' | 'MERGED' | 'CLOSED';
+  prChecks?: 'PASS' | 'FAIL' | 'PENDING' | null;
+  prReviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   repoUrl?: string;
 }
 

@@ -217,13 +217,47 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const branch = await run('git rev-parse --abbrev-ref HEAD');
 
       let prUrl: string | null = null;
+      let prNum: number | null = null;
+      let prState: string | null = null;  // OPEN, MERGED, CLOSED
+      let prChecks: string | null = null; // PASS, FAIL, PENDING, null
+      let prReviewDecision: string | null = null; // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, null
       try {
-        const { stdout } = await execAsync(`gh pr view --json url --jq .url 2>/dev/null`, { cwd });
-        const url = stdout.trim();
-        if (url.startsWith('https://')) prUrl = url;
-      } catch { /* gh not available or no PR */ }
+        const { stdout } = await execAsync(
+          `gh pr view --json url,number,state,statusCheckRollup,reviewDecision 2>/dev/null`,
+          { cwd }
+        );
+        const pr = JSON.parse(stdout.trim());
+        if (pr.url) prUrl = pr.url;
+        if (pr.number) prNum = pr.number;
+        if (pr.state) prState = pr.state;
+        if (pr.reviewDecision) prReviewDecision = pr.reviewDecision;
+        // Derive checks status from statusCheckRollup
+        if (Array.isArray(pr.statusCheckRollup) && pr.statusCheckRollup.length > 0) {
+          const statuses = pr.statusCheckRollup.map((c: any) => (c.conclusion ?? c.status ?? '').toUpperCase());
+          if (statuses.some((s: string) => s === 'FAILURE' || s === 'ERROR' || s === 'CANCELLED'))
+            prChecks = 'FAIL';
+          else if (statuses.some((s: string) => s === 'PENDING' || s === 'QUEUED' || s === 'IN_PROGRESS' || s === 'WAITING'))
+            prChecks = 'PENDING';
+          else if (statuses.every((s: string) => s === 'SUCCESS' || s === 'NEUTRAL' || s === 'SKIPPED'))
+            prChecks = 'PASS';
+        }
+      } catch {
+        // gh not available — try GitHub API as fallback
+        try {
+          const { stdout } = await execAsync(
+            `curl -sf -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${branch}&state=open&per_page=1" 2>/dev/null`,
+            { cwd, timeout: 5000 }
+          );
+          const prs = JSON.parse(stdout.trim());
+          if (Array.isArray(prs) && prs.length > 0) {
+            prUrl = prs[0].html_url;
+            prNum = prs[0].number;
+            prState = 'OPEN';
+          }
+        } catch { /* no gh, no API access */ }
+      }
 
-      res.json({ repoUrl, prUrl, branch, owner, repo });
+      res.json({ repoUrl, prUrl, prNum, prState, prChecks, prReviewDecision, branch, owner, repo });
     } catch {
       res.json(null);
     }
@@ -538,6 +572,31 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
           });
         }
       }
+      res.json({ results, cwd });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.get('/fs/:sessionId/find', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const query = (req.query.q as string | undefined ?? '').trim();
+      if (!query) return res.json({ results: [] });
+
+      const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+      const { stdout: pathOut } = await execAsync(
+        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+      );
+      const cwd = pathOut.trim();
+      if (!cwd) return res.status(404).json({ error: 'Session not found' });
+
+      const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache']
+        .map(d => `-not -path '*/${d}/*'`).join(' ');
+      const cmd = `find . ${excludeDirs} -type f -iname ${sh('*' + query + '*')} 2>/dev/null | head -100`;
+      const { stdout } = await execAsync(cmd, { cwd, timeout: 5000 }).catch(() => ({ stdout: '' }));
+
+      const results = stdout.split('\n').filter(Boolean).map(f => f.replace(/^\.\//, ''));
       res.json({ results, cwd });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -993,6 +1052,16 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       res.json({ ok: false, error: errors.join('; ') });
     } else {
       res.json({ ok: true });
+    }
+  });
+
+  router.post('/memory/claude-code-reload-plugins', async (_req, res) => {
+    try {
+      const injected = await bridge.injectClaudeCodeCommand('/reload-plugins');
+      res.json({ ok: true, sessions: injected.length });
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      res.json({ ok: false, error: err.message ?? String(e) });
     }
   });
 
