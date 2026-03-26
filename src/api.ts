@@ -109,6 +109,16 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  router.get('/diagnostics', (_req, res) => {
+    try {
+      const diag = bridge.diagnostics();
+      const uptime = process.uptime();
+      res.json({ ...diag, uptimeSeconds: uptime });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   router.post('/pick-directory', async (_req, res) => {
     try {
       if (os.platform() !== 'darwin') return res.json({ path: null });

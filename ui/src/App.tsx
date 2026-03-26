@@ -32,6 +32,8 @@ export default function App() {
   const connectSession = useCallback((sessionId: string) => {
     useStore.getState().setCurrentSessionId(sessionId);
     localStorage.setItem('vipershell-last-session', sessionId);
+    // Focus the terminal after session switch
+    setTimeout(() => window.dispatchEvent(new CustomEvent('vipershell:terminal-tab-active')), 100);
   }, []);
 
   const handleMessage = useCallback((msg: Record<string, unknown>) => {

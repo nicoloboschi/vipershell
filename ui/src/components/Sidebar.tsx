@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home, Sparkles } from 'lucide-react';
+import { Settings, ScrollText, Palette, Zap, TerminalSquare, BrainCircuit, Keyboard, SquarePlus, Home, Sparkles, Activity } from 'lucide-react';
 import { tildefy } from '../utils';
 import useStore, { activeTerminalSend } from '../store';
 import SessionList from './SessionList';
@@ -9,6 +9,7 @@ import CommandsDialog, { loadCommands } from './CommandsDialog';
 import MemoryDialog from './MemoryDialog';
 import ShortcutsDialog from './ShortcutsDialog';
 import AIFeaturesDialog from './AIFeaturesDialog';
+import DiagnosticsDialog from './DiagnosticsDialog';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -34,6 +35,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
   const [showMemory, setShowMemory] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [showDiag, setShowDiag] = useState(false);
   const [commands, setCommands] = useState(loadCommands);
   const [version, setVersion] = useState<string | null>(null);
   const [hindsightUp, setHindsightUp] = useState<boolean | null>(null);
@@ -207,6 +209,10 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
               <span className="font-mono text-primary">v{version ?? '\u2026'}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setShowDiag(true)}>
+              <Activity size={14} />
+              Diagnostics
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowLogs(true)}>
               <ScrollText size={14} />
               Server Logs
@@ -233,6 +239,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
         </DropdownMenu>
       </div>
 
+      {showDiag && <DiagnosticsDialog onClose={() => setShowDiag(false)} />}
       {showLogs && <LogsModal onClose={() => setShowLogs(false)} />}
       {showThemes && <ThemeDialog onClose={() => setShowThemes(false)} />}
       {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}

@@ -79,6 +79,7 @@ export class TmuxBridge {
   private knownSessions = new Set<string>();
   private memory: MemoryStore | null = null;
   private inputBuffers = new Map<string, string>();
+  private cachedSessions: Session[] = [];
 
   setMemory(memory: MemoryStore): void {
     this.memory = memory;
@@ -110,6 +111,7 @@ export class TmuxBridge {
 
   private async discoverSessions(): Promise<void> {
     const sessions = await this.listSessions();
+    this.cachedSessions = sessions;
     const liveIds = new Set(sessions.map(s => s.id));
 
     // Detect removed sessions
@@ -122,6 +124,7 @@ export class TmuxBridge {
           this.managed.delete(id);
         }
         this._closeScrollback(id, true);
+        this.inputBuffers.delete(id);
         await this._flushMemory(id, '');
         this.memBuffers.delete(id);
         logger.debug(`Session closed: ${id}`);
@@ -145,98 +148,158 @@ export class TmuxBridge {
         'tmux list-sessions -F "#{session_id}|#{session_name}|#{session_activity}|#{automatic-rename}" 2>/dev/null'
       );
       const lines = stdout.trim().split('\n').filter(Boolean);
-      const sessions: Session[] = [];
+      if (lines.length === 0) return [];
 
-      for (const line of lines) {
+      const parsed = lines.map(line => {
         const [id, name, activityStr, autoRenameStr] = line.split('|');
-        if (!id || !name) continue;
-        const autoRenameOff = autoRenameStr === '0';
-        try {
-          const { stdout: info } = await execAsync(
-            `tmux display-message -t ${sh(id)} -p "#{pane_current_path}|#{session_activity}|#{pane_pid}|#{pane_title}" 2>/dev/null`
-          );
-          const [path, paneActivityStr, panePidStr, paneTitle] = info.trim().split('|');
-          const paneActivity = parseInt(paneActivityStr ?? '0', 10);
-          const panePid = parseInt(panePidStr ?? '0', 10);
-          const nowSec = Math.floor(Date.now() / 1000);
-          // Busy if: recent output, OR shell has grandchildren (tool subprocesses),
-          // OR any direct child process has non-trivial CPU usage (e.g. Claude generating text)
-          const recentOutput = (nowSec - paneActivity) < 5;
-          let busy = recentOutput;
-          if (!busy && panePid) {
-            try {
-              // Check grandchildren (active tool execution) and child CPU (active generation)
-              const { stdout: childInfo } = await execAsync(
-                `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o pid=,pcpu= 2>/dev/null || true`
-              );
-              for (const line of childInfo.trim().split('\n').filter(Boolean)) {
-                const [, cpuStr] = line.trim().split(/\s+/);
-                const cpu = parseFloat(cpuStr ?? '0');
-                if (cpu > 5) { busy = true; break; }
-                // Also check grandchildren
-                const [pidStr] = line.trim().split(/\s+/);
-                const { stdout: gc } = await execAsync(`pgrep -P ${pidStr} 2>/dev/null | wc -l || echo 0`);
-                if (parseInt(gc.trim()) > 0) { busy = true; break; }
-              }
-            } catch { /* ignore */ }
-          }
-          // Detect Claude Code by checking child process commands
-          let isClaudeCode = false;
-          if (panePid) {
-            try {
-              const { stdout: childCmds } = await execAsync(
-                `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o comm= 2>/dev/null || true`
-              );
-              isClaudeCode = childCmds.split('\n').some(c => /\bclaude\b/i.test(c.trim()));
-            } catch { /* ignore */ }
-          }
-          // If automatic-rename is off, we (or the user) set the session name explicitly — use it.
-          // Otherwise fall back to pane_title (e.g. Claude Code task description) or session name.
-          const displayName = autoRenameOff
-            ? name
-            : (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
-              ? paneTitle.trim()
-              : name;
-          // Collect CPU/mem for child process tree
-          let cpuPercent = 0;
-          let memMb = 0;
-          if (panePid) {
-            try {
-              const isLinux = os.platform() === 'linux';
-              const psCmd = isLinux
-                ? `pstree -p ${panePid} 2>/dev/null | grep -oP '\\(\\K[0-9]+' | xargs -I{} ps -p {} -o pcpu=,rss= 2>/dev/null || true`
-                : `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o pcpu=,rss= 2>/dev/null || true`;
-              const { stdout: psOut } = await execAsync(psCmd, { timeout: 2000 });
-              for (const line of psOut.trim().split('\n').filter(Boolean)) {
-                const parts = line.trim().split(/\s+/);
-                cpuPercent += parseFloat(parts[0] ?? '0') || 0;
-                memMb += (parseInt(parts[1] ?? '0', 10) || 0) / 1024;
-              }
-            } catch { /* ignore */ }
-          }
+        return { id: id!, name: name!, activityStr: activityStr ?? '0', autoRenameOff: autoRenameStr === '0' };
+      }).filter(s => s.id && s.name);
 
-          sessions.push({
-            id,
-            name: displayName,
-            path: path ?? os.homedir(),
-            username: os.userInfo().username,
-            last_activity: parseInt(activityStr ?? '0', 10),
-            busy,
-            isClaudeCode,
-            cpuPercent: Math.round(cpuPercent * 10) / 10,
-            memMb: Math.round(memMb),
-          });
-        } catch {
-          sessions.push({
-            id,
-            name,
-            path: os.homedir(),
-            username: os.userInfo().username,
-            last_activity: parseInt(activityStr ?? '0', 10),
-            busy: false,
-          });
-        }
+      // Batch tmux display-message for all sessions in one shell command
+      const tmuxCmd = parsed
+        .map(s => `tmux display-message -t ${sh(s.id)} -p "#{pane_current_path}|#{session_activity}|#{pane_pid}|#{pane_title}" 2>/dev/null || echo "|||"`)
+        .join('; echo "---SEP---"; ');
+      const { stdout: tmuxOut } = await execAsync(tmuxCmd, { timeout: 5000 });
+      const tmuxChunks = tmuxOut.split('---SEP---');
+
+      // Collect all pane PIDs for a single batched process inspection
+      const paneInfos: { path: string; paneActivity: number; panePid: number; paneTitle: string }[] = [];
+      for (let i = 0; i < parsed.length; i++) {
+        const info = (tmuxChunks[i] ?? '|||').trim();
+        const [path, paneActivityStr, panePidStr, paneTitle] = info.split('|');
+        paneInfos.push({
+          path: path ?? os.homedir(),
+          paneActivity: parseInt(paneActivityStr ?? '0', 10),
+          panePid: parseInt(panePidStr ?? '0', 10),
+          paneTitle: paneTitle ?? '',
+        });
       }
+
+      // Single batched process inspection: get all child PIDs, their commands, CPU, RSS, and grandchild counts
+      const allPids = paneInfos.map(p => p.panePid).filter(p => p > 0);
+      const processMap = new Map<number, { children: { pid: number; comm: string; cpu: number; rss: number; hasGrandchildren: boolean }[] }>();
+
+      if (allPids.length > 0) {
+        try {
+          // One command: for each pane PID, get children with comm, cpu, rss and grandchild count
+          const isLinux = os.platform() === 'linux';
+          const inspectCmd = allPids.map(pid => {
+            if (isLinux) {
+              return `echo "PANE:${pid}"; ps -o pid=,comm=,pcpu=,rss= --ppid ${pid} 2>/dev/null || true; ` +
+                `echo "GC:${pid}"; pgrep -P $(pgrep -P ${pid} 2>/dev/null | tr '\\n' ',' | sed 's/,$//') 2>/dev/null | wc -l || echo 0`;
+            }
+            return `echo "PANE:${pid}"; pgrep -P ${pid} 2>/dev/null | xargs -I{} ps -p {} -o pid=,comm=,pcpu=,rss= 2>/dev/null || true; ` +
+              `echo "GC:${pid}"; for cpid in $(pgrep -P ${pid} 2>/dev/null); do pgrep -P $cpid 2>/dev/null; done | wc -l || echo 0`;
+          }).join('; ');
+          const { stdout: inspectOut } = await execAsync(inspectCmd, { timeout: 5000 });
+
+          let currentPanePid = 0;
+          let inGc = false;
+          let gcCount = 0;
+          const children: { pid: number; comm: string; cpu: number; rss: number }[] = [];
+
+          for (const line of inspectOut.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            const paneMatch = trimmed.match(/^PANE:(\d+)$/);
+            if (paneMatch) {
+              // Save previous (skip if GC handler already saved it)
+              if (currentPanePid > 0 && !processMap.has(currentPanePid)) {
+                processMap.set(currentPanePid, {
+                  children: children.splice(0).map(c => ({ ...c, hasGrandchildren: false })),
+                });
+              } else {
+                children.length = 0;
+              }
+              currentPanePid = parseInt(paneMatch[1]!, 10);
+              inGc = false;
+              continue;
+            }
+
+            const gcMatch = trimmed.match(/^GC:(\d+)$/);
+            if (gcMatch) {
+              inGc = true;
+              gcCount = 0;
+              continue;
+            }
+
+            if (inGc) {
+              gcCount = parseInt(trimmed, 10) || 0;
+              if (currentPanePid > 0) {
+                const entry = processMap.get(currentPanePid) ?? { children: children.splice(0).map(c => ({ ...c, hasGrandchildren: false })) };
+                // Mark all children as having grandchildren if any exist
+                if (gcCount > 0) {
+                  for (const c of entry.children) c.hasGrandchildren = true;
+                }
+                processMap.set(currentPanePid, entry);
+              }
+              inGc = false;
+              continue;
+            }
+
+            // Child process line: pid comm cpu rss
+            const parts = trimmed.split(/\s+/);
+            if (parts.length >= 4) {
+              children.push({
+                pid: parseInt(parts[0]!, 10),
+                comm: parts[1] ?? '',
+                cpu: parseFloat(parts[2] ?? '0'),
+                rss: parseInt(parts[3] ?? '0', 10),
+              });
+            }
+          }
+          // Save last
+          if (currentPanePid > 0 && !processMap.has(currentPanePid)) {
+            processMap.set(currentPanePid, {
+              children: children.splice(0).map(c => ({ ...c, hasGrandchildren: false })),
+            });
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Build session objects
+      const hostname = os.hostname();
+      const username = os.userInfo().username;
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      const sessions: Session[] = parsed.map((s, i) => {
+        const pi = paneInfos[i]!;
+        const procs = processMap.get(pi.panePid);
+
+        const recentOutput = (nowSec - pi.paneActivity) < 5;
+        let busy = recentOutput;
+        let isClaudeCode = false;
+        let cpuPercent = 0;
+        let memMb = 0;
+
+        if (procs) {
+          for (const c of procs.children) {
+            if (!busy && (c.cpu > 5 || c.hasGrandchildren)) busy = true;
+            if (/\bclaude\b/i.test(c.comm)) isClaudeCode = true;
+            cpuPercent += c.cpu;
+            memMb += c.rss / 1024;
+          }
+        }
+
+        const displayName = s.autoRenameOff
+          ? s.name
+          : (pi.paneTitle && pi.paneTitle.trim() && pi.paneTitle.trim() !== hostname)
+            ? pi.paneTitle.trim()
+            : s.name;
+
+        return {
+          id: s.id,
+          name: displayName,
+          path: pi.path || os.homedir(),
+          username,
+          last_activity: parseInt(s.activityStr, 10),
+          busy,
+          isClaudeCode,
+          cpuPercent: Math.round(cpuPercent * 10) / 10,
+          memMb: Math.round(memMb),
+        };
+      });
 
       return sessions;
     } catch {
@@ -413,23 +476,43 @@ export class TmuxBridge {
   }
 
   private async publishPreviews(): Promise<void> {
-    const sessions = await this.listSessions();
-    for (const session of sessions) {
-      try {
-        const { stdout } = await execAsync(
-          `tmux capture-pane -p -t ${sh(session.id)} 2>/dev/null`
-        );
-        const lines = stdout.split('\n').filter(l => l.trim());
+    // Use cached sessions from last discoverSessions() — avoids re-running
+    // all the heavy pgrep/ps/pstree calls every second.
+    const sessions = this.cachedSessions;
+    if (sessions.length === 0) return;
+
+    // Batch all capture-pane calls into a single tmux command
+    const ids = sessions.map(s => s.id);
+    const busyMap = new Map(sessions.map(s => [s.id, s.busy]));
+    try {
+      const captureCmd = ids
+        .map(id => `tmux capture-pane -p -t ${sh(id)} 2>/dev/null; echo "---VIPER_SEP---"`)
+        .join('; ');
+      const { stdout } = await execAsync(captureCmd, { timeout: 5000 });
+      const chunks = stdout.split('---VIPER_SEP---');
+      for (let i = 0; i < ids.length && i < chunks.length; i++) {
+        const lines = chunks[i]!.split('\n').filter(l => l.trim());
         const preview = lines.slice(-2).join('\n');
         this.pubsub.publish('__sessions__', {
           type: 'preview',
-          session_id: session.id,
+          session_id: ids[i]!,
           preview,
-          busy: session.busy,
+          busy: busyMap.get(ids[i]!) ?? false,
         });
-        // Memory retention is handled by the Claude Code plugin, not the bridge
-      } catch { /* ignore */ }
-    }
+      }
+    } catch { /* ignore */ }
+  }
+
+  diagnostics() {
+    return {
+      managedPtys: this.managed.size,
+      scrollbackStreams: this.scrollbackStreams.size,
+      memBuffers: this.memBuffers.size,
+      inputBuffers: this.inputBuffers.size,
+      knownSessions: this.knownSessions.size,
+      pubsubChannels: this.pubsub.channelStats(),
+      serverMemory: process.memoryUsage(),
+    };
   }
 
   private async _flushMemory(sessionId: string, path: string, buf?: MemBuffer): Promise<void> {

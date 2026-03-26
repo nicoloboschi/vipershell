@@ -22,4 +22,11 @@ export class PubSub<T> {
   channelSize(channel: string): number {
     return this.channels.get(channel)?.size ?? 0;
   }
+
+  channelStats(): { channel: string; subscribers: number }[] {
+    return [...this.channels.entries()].map(([channel, subs]) => ({
+      channel,
+      subscribers: subs.size,
+    }));
+  }
 }
