@@ -4,3 +4,5 @@ ui/dist/
 ui/node_modules/
 *.js.map
 *.d.ts
+.env
+.env.*
