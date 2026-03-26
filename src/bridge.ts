@@ -42,6 +42,10 @@ export interface Session {
   last_activity: number;
   busy: boolean;
   isClaudeCode?: boolean;
+  /** Aggregate CPU % of all child processes */
+  cpuPercent?: number;
+  /** Aggregate RSS memory in MB of all child processes */
+  memMb?: number;
 }
 
 interface ManagedSession {
@@ -193,6 +197,24 @@ export class TmuxBridge {
             : (paneTitle && paneTitle.trim() && paneTitle.trim() !== os.hostname())
               ? paneTitle.trim()
               : name;
+          // Collect CPU/mem for child process tree
+          let cpuPercent = 0;
+          let memMb = 0;
+          if (panePid) {
+            try {
+              const isLinux = os.platform() === 'linux';
+              const psCmd = isLinux
+                ? `pstree -p ${panePid} 2>/dev/null | grep -oP '\\(\\K[0-9]+' | xargs -I{} ps -p {} -o pcpu=,rss= 2>/dev/null || true`
+                : `pgrep -P ${panePid} 2>/dev/null | xargs -I{} ps -p {} -o pcpu=,rss= 2>/dev/null || true`;
+              const { stdout: psOut } = await execAsync(psCmd, { timeout: 2000 });
+              for (const line of psOut.trim().split('\n').filter(Boolean)) {
+                const parts = line.trim().split(/\s+/);
+                cpuPercent += parseFloat(parts[0] ?? '0') || 0;
+                memMb += (parseInt(parts[1] ?? '0', 10) || 0) / 1024;
+              }
+            } catch { /* ignore */ }
+          }
+
           sessions.push({
             id,
             name: displayName,
@@ -201,6 +223,8 @@ export class TmuxBridge {
             last_activity: parseInt(activityStr ?? '0', 10),
             busy,
             isClaudeCode,
+            cpuPercent: Math.round(cpuPercent * 10) / 10,
+            memMb: Math.round(memMb),
           });
         } catch {
           sessions.push({

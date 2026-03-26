@@ -37,6 +37,32 @@ export default function SessionItem({ session, isActive, onConnect }: SessionIte
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span className={`session-name-inline${unseen && !isActive ? ' session-name-unseen' : ''}`} style={{ flex: 1 }}>{session.name || '\u2014'}</span>
+          {(session.cpuPercent ?? 0) > 5 && (
+            <span
+              style={{
+                fontSize: 9,
+                fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                color: (session.cpuPercent ?? 0) > 80 ? '#ff7b72' : (session.cpuPercent ?? 0) > 30 ? '#d29922' : '#8b949e',
+                flexShrink: 0,
+              }}
+              title={`CPU: ${session.cpuPercent?.toFixed(0)}% | Mem: ${session.memMb ?? 0} MB`}
+            >
+              {session.cpuPercent!.toFixed(0)}%
+            </span>
+          )}
+          {(session.memMb ?? 0) > 100 && (
+            <span
+              style={{
+                fontSize: 9,
+                fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                color: (session.memMb ?? 0) > 1024 ? '#ff7b72' : (session.memMb ?? 0) > 500 ? '#d29922' : '#8b949e',
+                flexShrink: 0,
+              }}
+              title={`Mem: ${session.memMb} MB`}
+            >
+              {(session.memMb ?? 0) >= 1024 ? `${((session.memMb ?? 0) / 1024).toFixed(1)}G` : `${session.memMb}M`}
+            </span>
+          )}
           <span className="session-time">{time ?? ''}</span>
         </div>
         {lastCommand && (

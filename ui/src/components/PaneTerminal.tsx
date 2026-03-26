@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useStore from '../store';
 import SessionStatsBar from './SessionStatsBar';
 import GitDiffPane from './GitDiffPane';
@@ -25,6 +26,16 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
   const [highlightLine,  setHighlightLine]  = useState<number | null>(null);
   const [gridLayout, setGridLayout] = useState<Layout>('single');
   const changeLayoutRef = useRef<((l: Layout) => void) | null>(null);
+
+  // Keep visited sessions mounted (hidden) for instant switching
+  const allSessionIds = useStore(useShallow(s => s.sessions.map(ss => ss.id)));
+  const [visitedIds, setVisitedIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!sessionId || sessionId === NOTES_SESSION_ID) return;
+    setVisitedIds(prev => prev.includes(sessionId) ? prev : [...prev, sessionId]);
+  }, [sessionId]);
+  // Remove closed sessions from cache
+  const activeVisited = visitedIds.filter(id => allSessionIds.includes(id));
 
   const LS_KEY      = 'vipershell:session-tabs';
   const LS_FILE_KEY = 'vipershell:session-last-file';
@@ -161,19 +172,25 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
         layout={gridLayout}
         onLayoutChange={(l) => changeLayoutRef.current?.(l)}
       />
-      <div style={{ display: activeTab === 'terminal' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
-        {sessionId && (
+      {activeVisited.map(vid => (
+        <div
+          key={vid}
+          style={{
+            display: activeTab === 'terminal' && vid === sessionId ? 'flex' : 'none',
+            flex: 1, flexDirection: 'column', minHeight: 0,
+          }}
+        >
           <TerminalGrid
-            sessionId={sessionId}
+            sessionId={vid}
             onCreateSplit={handleCreateSplit}
             onFileLinkClick={handleFileLinkClick}
-            onLayoutReady={({ layout: l, changeLayout }) => {
+            onLayoutReady={vid === sessionId ? ({ layout: l, changeLayout }) => {
               setGridLayout(l);
               changeLayoutRef.current = changeLayout;
-            }}
+            } : undefined}
           />
-        )}
-      </div>
+        </div>
+      ))}
       {activeTab === 'diff'   && <GitDiffPane sessionId={sessionId} onOpenFile={(path: string) => { setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />}
       {activeTab === 'files'  && <FilesPane  sessionId={sessionId} openFileRef={openFileRef} onFileSelect={(path: string) => { saveLastFile(sessionId!, path); setHighlightQuery(null); setHighlightLine(null); }} highlightQuery={highlightQuery} highlightLine={highlightLine} />}
       {activeTab === 'search' && (

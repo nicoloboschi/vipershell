@@ -24,7 +24,10 @@ export default function LogsModal({ onClose }: LogsModalProps) {
     const es = new EventSource('/api/logs/stream');
     es.onmessage = (e) => {
       const entry: LogEntry = JSON.parse(e.data);
-      setLogs(prev => [...prev, entry]);
+      setLogs(prev => {
+        const next = [...prev, entry];
+        return next.length > 500 ? next.slice(-500) : next;
+      });
     };
     return () => es.close();
   }, []);

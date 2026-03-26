@@ -9,6 +9,8 @@ export interface Session {
   username?: string;
   last_activity?: number;
   isClaudeCode?: boolean;
+  cpuPercent?: number;
+  memMb?: number;
 }
 
 export interface ConfirmState {

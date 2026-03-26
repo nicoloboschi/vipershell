@@ -203,8 +203,6 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
               }
             });
           }
-          // Mark unseen immediately (cheap, no rendering)
-          useStore.getState().markUnseen(sessionId);
         }
       };
 
