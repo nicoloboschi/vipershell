@@ -11,7 +11,7 @@ const program = new Command();
 program
   .name('vipershell')
   .description('Your machine, anywhere — tmux sessions in your browser')
-  .version('0.1.0')
+  .version('0.0.1')
   .option('--host <host>', 'Host to bind to', config.host)
   .option('--port <port>', 'Port to listen on', String(config.port))
   .option('--log-level <level>', 'Log level (debug|info|warning|error)', config.logLevel)
