@@ -131,8 +131,8 @@ describe('GET /api/sessions', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as typeof mockSessions
     expect(Array.isArray(body)).toBe(true)
-    expect(body[0].id).toBe('$0')
-    expect(body[0].name).toBe('shell')
+    expect(body[0]!.id).toBe('$0')
+    expect(body[0]!.name).toBe('shell')
   })
 })
 

@@ -6,8 +6,6 @@ import { TmuxBridge } from '../bridge.js'
 
 // Use a temp directory for scrollback/sessions so tests don't touch real config
 const TEST_DIR = join(os.tmpdir(), `vipershell-test-${process.pid}`)
-const SCROLLBACK_DIR = join(TEST_DIR, 'scrollback')
-const SESSIONS_FILE = join(TEST_DIR, 'sessions.json')
 
 // We need to mock the module-level constants. Since they use homedir(),
 // we mock homedir to redirect to our temp dir structure.
