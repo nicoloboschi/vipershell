@@ -9,7 +9,9 @@ import CommandsDialog, { loadCommands } from './CommandsDialog';
 import MemoryDialog from './MemoryDialog';
 import ShortcutsDialog from './ShortcutsDialog';
 import AIFeaturesDialog from './AIFeaturesDialog';
+import ClaudeIcon from './ClaudeIcon';
 import DiagnosticsDialog from './DiagnosticsDialog';
+import DirectoryPicker from './DirectoryPicker';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -37,6 +39,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
   const [showAI, setShowAI] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [commands, setCommands] = useState(loadCommands);
+  const [claudeCommand, setClaudeCommand] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [hindsightUp, setHindsightUp] = useState<boolean | null>(null);
   const [sidebarW, setSidebarW] = useState(() => {
@@ -94,6 +97,15 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
       .catch(() => setVersion('?'));
   }, []);
 
+  // Fetch AI config to show Claude Code quick-launch button
+  const fetchAIConfig = useCallback(() => {
+    fetch('/api/ai/config')
+      .then(r => r.json())
+      .then(cfg => setClaudeCommand(cfg.aiEnabled ? (cfg.claudeCommand || 'claude') : null))
+      .catch(() => setClaudeCommand(null));
+  }, []);
+  useEffect(() => { fetchAIConfig(); }, [fetchAIConfig]);
+
   return (
     <aside
       className="hidden md:flex flex-col shrink-0"
@@ -139,33 +151,89 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
               <SquarePlus size={14} />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-56">
-            <DropdownMenuItem onClick={() => send({ type: 'create_session', path: null, from_session_id: currentSessionId })}>
-              <Home size={14} />
-              <span className="text-xs">Home</span>
-            </DropdownMenuItem>
+          <DropdownMenuContent align="end" side="top" className="w-72 !overflow-hidden p-0">
+            {/* Home */}
+            <div className="px-1 pt-1">
+              <DropdownMenuItem onClick={() => send({ type: 'create_session', path: null, from_session_id: currentSessionId })}>
+                <Home size={14} />
+                <span className="text-xs">Home</span>
+              </DropdownMenuItem>
+            </div>
+
+            {/* Recent */}
             {(() => {
               const username = sessions.find(s => s.username)?.username;
               const dirs = [...new Set(sessions.map(s => s.path).filter(Boolean))] as string[];
               return dirs.length > 0 && <>
                 <DropdownMenuSeparator />
-                {dirs.map(path => (
-                  <DropdownMenuItem key={path} onClick={() => send({ type: 'create_session', path, from_session_id: currentSessionId })}>
-                    <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
-                  </DropdownMenuItem>
-                ))}
+                <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Recent</DropdownMenuLabel>
+                <div className="overflow-y-auto px-1" style={{ maxHeight: 100 }}>
+                  {dirs.map(path => (
+                    <DropdownMenuItem key={path} onClick={() => send({ type: 'create_session', path, from_session_id: currentSessionId })}>
+                      <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
               </>;
             })()}
+
+            {/* Browse */}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={async () => {
-              const res = await fetch('/api/pick-directory', { method: 'POST' });
-              const { path } = await res.json();
-              if (path) send({ type: 'create_session', path, from_session_id: currentSessionId });
-            }}>
-              Choose directory{'\u2026'}
-            </DropdownMenuItem>
+            <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Browse</DropdownMenuLabel>
+            <DirectoryPicker
+              initialPath="~"
+              onSelect={(path) => {
+                send({ type: 'create_session', path, from_session_id: currentSessionId });
+              }}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {claudeCommand && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" title="New Claude Code session" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+                <ClaudeIcon size={14} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="w-72 !overflow-hidden p-0">
+              {/* Home */}
+              <div className="px-1 pt-1">
+                <DropdownMenuItem onClick={() => send({ type: 'create_session', path: null, from_session_id: currentSessionId, init_command: claudeCommand })}>
+                  <Home size={14} />
+                  <span className="text-xs">Home</span>
+                </DropdownMenuItem>
+              </div>
+
+              {/* Recent */}
+              {(() => {
+                const username = sessions.find(s => s.username)?.username;
+                const dirs = [...new Set(sessions.map(s => s.path).filter(Boolean))] as string[];
+                return dirs.length > 0 && <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Recent</DropdownMenuLabel>
+                  <div className="overflow-y-auto px-1" style={{ maxHeight: 100 }}>
+                    {dirs.map(path => (
+                      <DropdownMenuItem key={path} onClick={() => send({ type: 'create_session', path, from_session_id: currentSessionId, init_command: claudeCommand })}>
+                        <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                </>;
+              })()}
+
+              {/* Browse */}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Browse</DropdownMenuLabel>
+              <DirectoryPicker
+                initialPath="~"
+                onSelect={(path) => {
+                  send({ type: 'create_session', path, from_session_id: currentSessionId, init_command: claudeCommand });
+                }}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         <DropdownMenu onOpenChange={(open) => { if (open) setCommands(loadCommands()); }}>
           <DropdownMenuTrigger asChild>
@@ -245,7 +313,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
       {showMemory && <MemoryDialog onClose={() => setShowMemory(false)} />}
       {showCommands && <CommandsDialog onClose={() => { setShowCommands(false); setCommands(loadCommands()); }} />}
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
-      {showAI && <AIFeaturesDialog onClose={() => setShowAI(false)} />}
+      {showAI && <AIFeaturesDialog onClose={() => { setShowAI(false); fetchAIConfig(); }} />}
     </aside>
   );
 }

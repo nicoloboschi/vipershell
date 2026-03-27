@@ -7,6 +7,7 @@ import CommandsDialog, { loadCommands } from './CommandsDialog';
 import LogsModal from './LogsModal';
 import ThemeDialog from './ThemeDialog';
 import MemoryDialog from './MemoryDialog';
+import DirectoryPicker from './DirectoryPicker';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -184,31 +185,34 @@ export default function MobileSheet({ onConnect, send }: MobileSheetProps) {
                 <SquarePlus size={14} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="top" className="w-56">
-              <DropdownMenuItem onClick={() => { send({ type: 'create_session', path: null }); setSheetOpen(false); }}>
-                <Home size={14} />
-                <span className="text-xs">Home</span>
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" side="top" className="w-72 !overflow-hidden p-0">
+              <div className="px-1 pt-1">
+                <DropdownMenuItem onClick={() => { send({ type: 'create_session', path: null }); setSheetOpen(false); }}>
+                  <Home size={14} />
+                  <span className="text-xs">Home</span>
+                </DropdownMenuItem>
+              </div>
               {(() => {
                 const username = sessions.find(s => s.username)?.username;
                 const dirs = [...new Set(sessions.map(s => s.path).filter(Boolean))] as string[];
                 return dirs.length > 0 && <>
                   <DropdownMenuSeparator />
-                  {dirs.map(path => (
-                    <DropdownMenuItem key={path} onClick={() => { send({ type: 'create_session', path }); setSheetOpen(false); }}>
-                      <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
-                    </DropdownMenuItem>
-                  ))}
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Recent</DropdownMenuLabel>
+                  <div className="overflow-y-auto px-1" style={{ maxHeight: 100 }}>
+                    {dirs.map(path => (
+                      <DropdownMenuItem key={path} onClick={() => { send({ type: 'create_session', path }); setSheetOpen(false); }}>
+                        <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
                 </>;
               })()}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={async () => {
-                const res = await fetch('/api/pick-directory', { method: 'POST' });
-                const { path } = await res.json();
-                if (path) { send({ type: 'create_session', path }); setSheetOpen(false); }
-              }}>
-                Choose directory{'\u2026'}
-              </DropdownMenuItem>
+              <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Browse</DropdownMenuLabel>
+              <DirectoryPicker
+                initialPath="~"
+                onSelect={(path) => { send({ type: 'create_session', path }); setSheetOpen(false); }}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
           </div>

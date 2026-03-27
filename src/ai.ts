@@ -53,11 +53,13 @@ export interface AIConfig {
   aiProvider: AIProvider;
   autoNaming: boolean;
   autoNamingIntervalSecs: number;
+  claudeCommand: string;
 }
 
 const AI_DEFAULTS: AIConfig = {
   aiEnabled: false,
   aiProvider: 'claude-code',
+  claudeCommand: 'claude',
   autoNaming: true,
   autoNamingIntervalSecs: 30,
 };
@@ -80,6 +82,7 @@ export class AIService {
         aiProvider: data.aiProvider ?? AI_DEFAULTS.aiProvider,
         autoNaming: data.aiAutoNaming ?? AI_DEFAULTS.autoNaming,
         autoNamingIntervalSecs: data.aiAutoNamingIntervalSecs ?? AI_DEFAULTS.autoNamingIntervalSecs,
+        claudeCommand: data.claudeCommand ?? AI_DEFAULTS.claudeCommand,
       };
     } catch {
       return { ...AI_DEFAULTS };
@@ -93,6 +96,7 @@ export class AIService {
     if ('aiProvider' in updates) data.aiProvider = updates.aiProvider;
     if ('autoNaming' in updates) data.aiAutoNaming = updates.autoNaming;
     if ('autoNamingIntervalSecs' in updates) data.aiAutoNamingIntervalSecs = updates.autoNamingIntervalSecs;
+    if ('claudeCommand' in updates) data.claudeCommand = updates.claudeCommand;
     mkdirSync(dirname(CONFIG_PATH), { recursive: true });
     writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2) + '\n');
   }
@@ -179,6 +183,9 @@ export class AIService {
         logger.debug(`AI naming ${sessionId}: content unchanged, skipping`);
         return;
       }
+      // Store hash immediately so unchanged content is never re-processed,
+      // even if the LLM call below fails or times out.
+      this.lastContentHash.set(sessionId, contentHash);
 
       const prompt = `Based on this terminal output, give a very short name (max 6 words) for this terminal session. Use lowercase, no title case, no emojis, no quotes. Just output the name, nothing else.\n\nTerminal output:\n${snippet}`;
 
@@ -226,7 +233,6 @@ export class AIService {
       // Disable tmux automatic-rename so it doesn't overwrite our name
       await execAsync(`tmux set-option -t '${sessionId.replace(/'/g, "'\\''")}' automatic-rename off 2>/dev/null`).catch(() => {});
       await this.bridge!.renameSession(sessionId, name);
-      this.lastContentHash.set(sessionId, contentHash);
       logger.info(`AI renamed ${sessionId} → "${name}"`);
     } catch (e) {
       logger.debug(`AI naming failed for ${sessionId}: ${e}`);

@@ -66,7 +66,7 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
 
   const tabs = onTabChange ? [
     { id: 'terminal', icon: <SquareTerminal size={11} />, label: 'Terminal' },
-    { id: 'diff',     icon: <GitBranch size={11} />,      label: 'Git Diff' },
+    { id: 'diff',     icon: <GitBranch size={11} />,      label: 'Git' },
     { id: 'files',    icon: <FolderOpen size={11} />,     label: 'Files'    },
     { id: 'search',   icon: <Search size={11} />,         label: 'Search'   },
   ] : [];

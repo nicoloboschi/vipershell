@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Check, Loader, RotateCw, Tag } from 'lucide-react';
+import { Sparkles, Check, Loader, RotateCw, Tag, TerminalSquare } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 
@@ -9,6 +9,7 @@ interface AIConfig {
   aiEnabled: boolean;
   aiProvider: AIProvider;
   autoNaming: boolean;
+  claudeCommand: string;
 }
 
 type AsyncState = 'idle' | 'loading' | 'ok' | 'error';
@@ -117,6 +118,27 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
                       />
                       <span className="text-xs font-medium text-foreground">Enable auto-naming</span>
                     </label>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-border" />
+
+                  {/* Claude Code command */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <TerminalSquare size={13} className="text-muted-foreground" />
+                      <span className="text-xs font-semibold text-foreground">Claude Code</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Command to launch Claude Code. Used by the quick-launch button in the sidebar.
+                    </p>
+                    <input
+                      type="text"
+                      value={cfg.claudeCommand}
+                      onChange={e => setCfg({ ...cfg, claudeCommand: e.target.value })}
+                      placeholder="claude"
+                      className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground font-mono w-48"
+                    />
                   </div>
                 </>
               )}

@@ -5,7 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   RefreshCw, ChevronDown, ChevronRight, FilePlus, FileMinus, FileCode,
-  GitCommitHorizontal, GitBranch, Diff, FolderOpen, Eye,
+  GitCommitHorizontal, GitBranch, Diff, FolderOpen, Eye, ScrollText,
 } from 'lucide-react';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -387,9 +387,65 @@ function CommitList({ sessionId, base, selected, onSelect }: CommitListProps) {
   );
 }
 
+// ── Full log ──────────────────────────────────────────────────────────────────
+
+function FullLog({ sessionId }: { sessionId: string }) {
+  const [commits, setCommits] = useState<(Commit & { date: string })[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/git/${encodeURIComponent(sessionId)}/log?full=1&limit=200`)
+      .then(r => r.json())
+      .then(setCommits)
+      .catch(() => setCommits([]))
+      .finally(() => setLoading(false));
+  }, [sessionId]);
+
+  if (loading) return <div style={{ padding: 16, color: '#6e7681', fontSize: 12 }}>Loading…</div>;
+  if (commits.length === 0) return <div style={{ padding: 16, color: '#484f58', fontSize: 12 }}>No commits</div>;
+
+  // Group by date
+  const grouped = new Map<string, typeof commits>();
+  for (const c of commits) {
+    const day = c.date;
+    if (!grouped.has(day)) grouped.set(day, []);
+    grouped.get(day)!.push(c);
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: 0 }}>
+      {[...grouped.entries()].map(([date, cs]) => (
+        <div key={date}>
+          <div style={{
+            padding: '6px 16px', fontSize: 11, fontWeight: 600, color: '#6e7681',
+            background: '#161b22', borderBottom: '1px solid #30363d',
+            position: 'sticky', top: 0, zIndex: 1,
+          }}>
+            {date}
+          </div>
+          {cs.map(c => (
+            <div key={c.hash} style={{ padding: '8px 16px', borderBottom: '1px solid #161b22', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <GitCommitHorizontal size={13} color="#58a6ff" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: '#e6edf3', marginBottom: 2 }}>{c.subject}</div>
+                <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#6e7681' }}>
+                  <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color: '#79c0ff' }}>{c.short}</span>
+                  <span>{c.author}</span>
+                  <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{c.relDate}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Root ─────────────────────────────────────────────────────────────────────
 
-type ModeId = 'head' | 'branch' | 'commits';
+type ModeId = 'head' | 'branch' | 'commits' | 'log';
 
 interface Mode {
   id: ModeId;
@@ -401,6 +457,7 @@ const MODES = [
   { id: 'head',    icon: <Diff size={11} />,      label: 'Working tree' },
   { id: 'branch',  icon: <GitBranch size={11} />, label: 'Branch diff'  },
   { id: 'commits', icon: <GitCommitHorizontal size={11} />, label: 'Commits' },
+  { id: 'log',     icon: <ScrollText size={11} />, label: 'Log' },
 ] as const satisfies readonly Mode[];
 
 interface GitDiffPaneProps {
@@ -432,6 +489,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
 
   const load = useCallback(async () => {
     if (!sessionId) return;
+    if (mode === 'log') return;
     if (mode === 'commits' && !selectedCommit) return;
     setLoading(true); setError(null);
     try {
@@ -582,7 +640,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
                 fontSize: 11, padding: '3px 9px',
                 background: mode === id ? '#1f6feb' : 'none',
                 color: mode === id ? '#fff' : '#8b949e',
-                border: 'none', borderRight: id !== 'commits' ? '1px solid #30363d' : 'none',
+                border: 'none', borderRight: id !== 'log' ? '1px solid #30363d' : 'none',
                 cursor: 'pointer',
               }}
             >
@@ -630,6 +688,9 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
       </div>
 
       {/* Body */}
+      {mode === 'log' && sessionId ? (
+        <FullLog sessionId={sessionId} />
+      ) : (
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
         {/* Commit list (commits mode) */}
@@ -665,6 +726,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
           {!loading && files?.map((file, i) => <FileBlock key={i} file={file} gitRoot={gitRoot} isFocused={i === focusedFileIdx} />)}
         </div>
       </div>
+      )}
     </div>
   );
 }

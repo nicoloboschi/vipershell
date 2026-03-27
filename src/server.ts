@@ -63,6 +63,63 @@ interface ClientState {
   sessionId: string | null;
   unsubOutput: (() => void) | null;
   unsubSessions: (() => void) | null;
+  /** Total output bytes sent since last connect — used for sync checks */
+  bytesSent: number;
+}
+
+// ── Session connect logic (extracted for testability) ─────────────────────
+
+export interface ConnectDeps {
+  pubsub: TmuxBridge['pubsub'];
+  snapshot: (sessionId: string) => Promise<string>;
+  connectSession: (sessionId: string) => Promise<boolean>;
+  send: (msg: BridgeMessage | object) => void;
+}
+
+/**
+ * Handles the 'connect' flow: subscribes to live output, takes a snapshot,
+ * connects the PTY, and sends everything to the client in the right order.
+ * Returns the unsubscribe function for the pubsub subscription.
+ */
+export async function handleSessionConnect(
+  sessionId: string,
+  deps: ConnectDeps,
+): Promise<() => void> {
+  // 1. Subscribe to pubsub FIRST so we never miss output during
+  //    the async snapshot/connect calls below.
+  const pending: string[] = [];
+  let draining = false;
+  const unsub = deps.pubsub.subscribe(sessionId, (m: BridgeMessage) => {
+    if (m.type !== 'output') return;
+    if (draining) { deps.send(m); } else { pending.push(m.data); }
+  });
+
+  // 2. Take snapshot — the authoritative screen state. Any output
+  //    that arrives during this async call is safely buffered above.
+  const snap = await deps.snapshot(sessionId);
+
+  // 3. Ensure PTY is running. If newly created, tmux attach
+  //    dumps the visible screen which duplicates the snapshot —
+  //    discard the pending buffer in that case.
+  const isNew = await deps.connectSession(sessionId);
+
+  // 4. Send snapshot to client.
+  deps.send({ type: 'connected' });
+  deps.send({ type: 'output', data: snap });
+
+  // 5. Flush buffered live output. If PTY was freshly attached,
+  //    the pending data is just the initial screen dump (already
+  //    covered by the snapshot) — skip it to avoid duplicates.
+  if (isNew) {
+    await new Promise(r => setTimeout(r, 20));
+    pending.length = 0;
+  }
+  draining = true;
+  for (const data of pending) {
+    deps.send({ type: 'output', data });
+  }
+
+  return unsub;
 }
 
 // ── Server factory ────────────────────────────────────────────────────────────
@@ -86,7 +143,7 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws: WebSocket) => {
-    const state: ClientState = { sessionId: null, unsubOutput: null, unsubSessions: null };
+    const state: ClientState = { sessionId: null, unsubOutput: null, unsubSessions: null, bytesSent: 0 };
     logger.debug('WS client connected');
 
     // Subscribe to session list updates
@@ -119,48 +176,33 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             const sessionId = msg.session_id as string;
             state.unsubOutput?.();
             state.sessionId = sessionId;
-
-            // 1. Take the snapshot FIRST (before PTY attach potentially
-            //    creates new output) — this is the authoritative screen state.
-            const snap = await bridge.snapshot(sessionId);
-
-            // 2. Now subscribe to pubsub so we capture ALL new output.
-            const pending: string[] = [];
-            let draining = false;
-            state.unsubOutput = bridge.pubsub.subscribe(sessionId, (m) => {
-              if (m.type !== 'output') return;
-              if (draining) { send(m); } else { pending.push(m.data); }
+            state.bytesSent = 0;
+            // Wrap send to count output bytes for sync checks
+            const trackedSend = (m: BridgeMessage | object) => {
+              if ((m as any).type === 'output' && typeof (m as any).data === 'string') {
+                state.bytesSent += (m as any).data.length;
+              }
+              send(m);
+            };
+            state.unsubOutput = await handleSessionConnect(sessionId, {
+              pubsub: bridge.pubsub,
+              snapshot: (id) => bridge.snapshot(id),
+              connectSession: (id) => bridge.connectSession(id),
+              send: trackedSend,
             });
-
-            // 3. Ensure PTY is running. If newly created, tmux attach
-            //    dumps the visible screen which duplicates the snapshot —
-            //    discard the pending buffer in that case.
-            const isNew = await bridge.connectSession(sessionId);
-
-            // 4. Send snapshot to client.
-            send({ type: 'connected' });
-            send({ type: 'output', data: snap });
-
-            // 5. Flush buffered live output. If PTY was freshly attached,
-            //    the pending data is just the initial screen dump (already
-            //    covered by the snapshot) — skip it to avoid duplicates.
-            if (isNew) {
-              // Give the initial dump a moment to arrive, then discard
-              await new Promise(r => setTimeout(r, 20));
-              pending.length = 0;
-            }
-            draining = true;
-            for (const data of pending) {
-              send({ type: 'output', data });
-            }
             break;
           }
 
           case 'create_session': {
             const path = msg.path as string | undefined;
+            const initCommand = msg.init_command as string | undefined;
             // Send optimistic response immediately so UI can update fast
             const sessionId = await bridge.createSession(path);
             send({ type: 'session_created', session_id: sessionId, path: path || null });
+            // Send initial command to the new session's tmux pane
+            if (initCommand) {
+              bridge.sendKeys(sessionId, initCommand);
+            }
             // Then refresh full session list in background
             bridge.listSessions().then(sessions => {
               send({ type: 'sessions', sessions });
@@ -190,6 +232,13 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             if (state.sessionId) {
               bridge.resize(state.sessionId, msg.cols as number, msg.rows as number);
             }
+            break;
+          }
+
+          case 'sync': {
+            // Respond with total bytes sent since last connect so the client
+            // can detect drift and trigger a full refresh if needed.
+            send({ type: 'sync_snapshot', bytes_sent: state.bytesSent });
             break;
           }
         }

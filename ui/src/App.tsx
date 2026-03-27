@@ -21,6 +21,7 @@ import {
   Settings, ScrollText, Palette, ChevronDown, SquarePlus,
   Home, Zap, TerminalSquare, BrainCircuit, RefreshCw,
 } from 'lucide-react';
+import DirectoryPicker from './components/DirectoryPicker';
 import { tildefy } from './utils';
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -283,29 +284,32 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
                 <SquarePlus size={15} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom" className="w-52">
-              <DropdownMenuItem onClick={() => send({ type: 'create_session', path: null })}>
-                <Home size={14} /><span className="text-xs">Home</span>
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" side="bottom" className="w-72 !overflow-hidden p-0">
+              <div className="px-1 pt-1">
+                <DropdownMenuItem onClick={() => send({ type: 'create_session', path: null })}>
+                  <Home size={14} /><span className="text-xs">Home</span>
+                </DropdownMenuItem>
+              </div>
               {(() => {
                 const dirs = [...new Set(sessions.map(s => s.path).filter(Boolean))] as string[];
                 return dirs.length > 0 && <>
                   <DropdownMenuSeparator />
-                  {dirs.map(path => (
-                    <DropdownMenuItem key={path} onClick={() => send({ type: 'create_session', path })}>
-                      <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
-                    </DropdownMenuItem>
-                  ))}
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Recent</DropdownMenuLabel>
+                  <div className="overflow-y-auto px-1" style={{ maxHeight: 100 }}>
+                    {dirs.map(path => (
+                      <DropdownMenuItem key={path} onClick={() => send({ type: 'create_session', path })}>
+                        <span className="truncate font-mono text-xs">{tildefy(path, username)}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
                 </>;
               })()}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={async () => {
-                const res = await fetch('/api/pick-directory', { method: 'POST' });
-                const { path } = await res.json();
-                if (path) send({ type: 'create_session', path });
-              }}>
-                Choose directory&hellip;
-              </DropdownMenuItem>
+              <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal uppercase tracking-wider px-3 py-0.5">Browse</DropdownMenuLabel>
+              <DirectoryPicker
+                initialPath="~"
+                onSelect={(path) => send({ type: 'create_session', path })}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
 

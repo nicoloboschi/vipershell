@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { createWriteStream, mkdirSync, unlinkSync } from 'fs';
+import { createWriteStream, mkdirSync, unlinkSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import type { WriteStream } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -12,6 +12,7 @@ import type { MemoryStore } from './memory.js';
 import os from 'os';
 
 const SCROLLBACK_DIR = join(homedir(), '.config', 'vipershell', 'scrollback');
+const SESSIONS_FILE = join(homedir(), '.config', 'vipershell', 'sessions.json');
 const execAsync = promisify(exec);
 
 /**
@@ -61,6 +62,11 @@ interface MemBuffer {
   lastText: string;
 }
 
+interface SavedSession {
+  name: string;
+  path: string;
+}
+
 export type BridgeMessage =
   | { type: 'sessions'; sessions: Session[] }
   | { type: 'output'; data: string }
@@ -87,6 +93,8 @@ export class TmuxBridge {
 
   async start(): Promise<void> {
     mkdirSync(SCROLLBACK_DIR, { recursive: true });
+    // Restore sessions saved from a previous run (e.g. before reboot)
+    await this.restoreSessions();
     // Initial discovery
     await this.discoverSessions();
     // Poll every 2s for new/closed sessions
@@ -124,6 +132,7 @@ export class TmuxBridge {
           this.managed.delete(id);
         }
         this._closeScrollback(id, true);
+        this._unpersistSession(id);
         this.inputBuffers.delete(id);
         await this._flushMemory(id, '');
         this.memBuffers.delete(id);
@@ -131,10 +140,11 @@ export class TmuxBridge {
       }
     }
 
-    // Detect new sessions
+    // Detect new sessions and persist them
     for (const s of sessions) {
       if (!this.knownSessions.has(s.id)) {
         this.knownSessions.add(s.id);
+        this._persistSession(s.id, s.name, s.path);
         logger.debug(`Session discovered: ${s.id}`);
       }
     }
@@ -428,10 +438,17 @@ export class TmuxBridge {
       while (taken.has(name)) name = `${baseName}-${i++}`;
     } catch { /* no sessions yet — any name is fine */ }
 
-    const dirArg = path ? `-c ${JSON.stringify(path)}` : `-c ${JSON.stringify(os.homedir())}`;
+    const sessionPath = path ?? os.homedir();
+    const dirArg = `-c ${JSON.stringify(sessionPath)}`;
     await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg} && tmux set-option -t ${JSON.stringify(name)} status off`);
     const { stdout } = await execAsync(`tmux display-message -t ${JSON.stringify(name)} -p "#{session_id}" 2>/dev/null`);
-    return stdout.trim() || name;
+    const sessionId = stdout.trim() || name;
+    this._persistSession(sessionId, name, sessionPath);
+    return sessionId;
+  }
+
+  async sendKeys(sessionId: string, command: string): Promise<void> {
+    await execAsync(`tmux send-keys -t ${sh(sessionId)} ${sh(command)} Enter`);
   }
 
   async renameSession(sessionId: string, newName: string): Promise<void> {
@@ -466,6 +483,7 @@ export class TmuxBridge {
       this.managed.delete(sessionId);
     }
     this._closeScrollback(sessionId, true);
+    this._unpersistSession(sessionId);
     await execAsync(`tmux kill-session -t ${sh(sessionId)} 2>/dev/null`);
   }
 
@@ -518,6 +536,82 @@ export class TmuxBridge {
         });
       }
     } catch { /* ignore */ }
+  }
+
+  // --- Session persistence across reboots ---
+
+  private _loadSavedSessions(): Record<string, SavedSession> {
+    try {
+      if (existsSync(SESSIONS_FILE)) {
+        return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
+      }
+    } catch { /* corrupt file — start fresh */ }
+    return {};
+  }
+
+  private _writeSavedSessions(saved: Record<string, SavedSession>): void {
+    try {
+      writeFileSync(SESSIONS_FILE, JSON.stringify(saved, null, 2));
+    } catch { /* ignore */ }
+  }
+
+  private _persistSession(sessionId: string, name: string, path: string): void {
+    const saved = this._loadSavedSessions();
+    saved[sessionId] = { name, path };
+    this._writeSavedSessions(saved);
+  }
+
+  private _unpersistSession(sessionId: string): void {
+    const saved = this._loadSavedSessions();
+    if (sessionId in saved) {
+      delete saved[sessionId];
+      this._writeSavedSessions(saved);
+    }
+  }
+
+  private async restoreSessions(): Promise<void> {
+    const saved = this._loadSavedSessions();
+    const entries = Object.entries(saved);
+    if (entries.length === 0) return;
+
+    // Check which tmux sessions already exist (by ID and name)
+    let existingIds = new Set<string>();
+    let existingNames = new Set<string>();
+    try {
+      const { stdout } = await execAsync('tmux list-sessions -F "#{session_id}|#{session_name}" 2>/dev/null');
+      for (const line of stdout.trim().split('\n').filter(Boolean)) {
+        const [id, name] = line.split('|');
+        if (id) existingIds.add(id);
+        if (name) existingNames.add(name);
+      }
+    } catch { /* no tmux server — all sessions need restoring */ }
+
+    const newSaved: Record<string, SavedSession> = {};
+    for (const [oldId, sess] of entries) {
+      // Skip if a session with that ID or name already exists in tmux
+      // (AI naming may have changed the name, so check ID first)
+      if (existingIds.has(oldId) || existingNames.has(sess.name)) {
+        // Keep in saved state — discoverSessions will update the ID
+        continue;
+      }
+      try {
+        const dirArg = `-c ${JSON.stringify(sess.path)}`;
+        await execAsync(
+          `tmux new-session -d -s ${JSON.stringify(sess.name)} ${dirArg} && tmux set-option -t ${JSON.stringify(sess.name)} status off`
+        );
+        const { stdout } = await execAsync(
+          `tmux display-message -t ${JSON.stringify(sess.name)} -p "#{session_id}" 2>/dev/null`
+        );
+        const newId = stdout.trim() || sess.name;
+        newSaved[newId] = sess;
+        logger.info(`Restored session "${sess.name}" at ${sess.path} (${newId})`);
+      } catch (e) {
+        logger.debug(`Failed to restore session "${sess.name}": ${e}`);
+      }
+    }
+
+    // Rewrite the file with updated session IDs
+    this._writeSavedSessions(newSaved);
   }
 
   diagnostics() {

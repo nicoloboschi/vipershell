@@ -132,6 +132,24 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  router.get('/browse', (req, res) => {
+    try {
+      const raw = (req.query.path as string | undefined) ?? '~';
+      const dir = expandHome(raw);
+      const resolved = nodePath.resolve(dir);
+
+      const entries = readdirSync(resolved, { withFileTypes: true });
+      const dirs = entries
+        .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+        .map(e => ({ name: e.name, path: nodePath.join(resolved, e.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      res.json({ path: resolved, parent: nodePath.dirname(resolved), dirs });
+    } catch (e) {
+      res.status(400).json({ error: String(e) });
+    }
+  });
+
   router.post('/sessions', async (req, res) => {
     try {
       const { path } = req.body as { path?: string };
@@ -393,7 +411,8 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const cwd = pathOut.trim();
       if (!cwd) return res.json([]);
 
-      const baseRef = base ? `^${sh(base)}` : `^${sh('origin/main')}`;
+      const { full } = req.query as Record<string, string>;
+      const baseRef = full ? '' : base ? `^${sh(base)}` : `^${sh('origin/main')}`;
       const { stdout } = await execAsync(
         `git -C ${sh(cwd)} log HEAD ${baseRef} --format="%H\x1f%h\x1f%s\x1f%an\x1f%ar\x1f%ad" --date=short -${limit} 2>/dev/null`
       );
@@ -1096,6 +1115,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       autoNaming: body.autoNaming !== undefined ? Boolean(body.autoNaming) : cfg.autoNaming,
       autoNamingIntervalSecs: typeof body.autoNamingIntervalSecs === 'number'
         ? body.autoNamingIntervalSecs : cfg.autoNamingIntervalSecs,
+      claudeCommand: typeof body.claudeCommand === 'string' ? body.claudeCommand : cfg.claudeCommand,
     });
 
     ai.restart();

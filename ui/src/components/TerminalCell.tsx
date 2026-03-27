@@ -47,6 +47,9 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   // Output batching — accumulate chunks and flush once per animation frame
   const outputBufRef = useRef('');
   const flushRafRef = useRef(0);
+  const isRestoringRef = useRef(false);
+  // Track total bytes written to detect drift during sync checks
+  const bytesWrittenRef = useRef(0);
 
   // Create terminal once
   useEffect(() => {
@@ -194,6 +197,8 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
           useStore.getState().setLastCommand(msg.session_id, msg.command);
         } else if (msg.type === 'connected') {
           pendingResetRef.current = true;
+          isRestoringRef.current = true;
+          bytesWrittenRef.current = 0;
           const term = termRef.current;
           if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
         } else if (msg.type === 'output') {
@@ -203,6 +208,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             pendingResetRef.current = false;
             term.reset();
           }
+          bytesWrittenRef.current += (msg.data as string).length;
           const filtered = filterAltScreen(msg.data);
           // Accumulate output and flush once per animation frame for smoother rendering
           outputBufRef.current += filtered;
@@ -213,7 +219,14 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
               outputBufRef.current = '';
               const t = termRef.current;
               if (!t || !batch) return;
-              t.write(batch);
+              t.write(batch, () => {
+                // After xterm finishes processing the batch, scroll to bottom
+                // if we're restoring a session (page refresh / reconnect).
+                if (isRestoringRef.current) {
+                  isRestoringRef.current = false;
+                  t.scrollToBottom();
+                }
+              });
               // Extract URLs from the batched output
               const plain = stripAnsi(batch);
               const urls = plain.match(URL_RE);
@@ -225,6 +238,13 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
                 }
               }
             });
+          }
+        } else if (msg.type === 'sync_snapshot') {
+          // Periodic consistency check: server sends total bytes sent since
+          // last connect. If our count differs, we've drifted — do a full refresh.
+          const serverBytes = msg.bytes_sent as number;
+          if (serverBytes !== bytesWrittenRef.current) {
+            sendRef.current({ type: 'connect', session_id: sessionId });
           }
         }
       };
@@ -240,9 +260,18 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
     openWs();
 
+    // Periodic consistency sync — ask the server for a snapshot hash every 30s.
+    // If the hash differs from what xterm is showing, do a full refresh.
+    const syncInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        sendRef.current({ type: 'sync', session_id: sessionId });
+      }
+    }, 30_000);
+
     return () => {
       mountedRef.current = false;
       if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(syncInterval);
       if (ws) { ws.onclose = null; ws.close(); }
       if (flushRafRef.current) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = 0; }
       outputBufRef.current = '';
