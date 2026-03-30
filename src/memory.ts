@@ -237,6 +237,7 @@ export class MemoryStore {
     const child = spawn('uvx', ['hindsight-embed@latest', '-p', PROFILE, 'daemon', 'start'], {
       stdio: 'ignore',
       detached: false,
+      env: { ...process.env, HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: '0' },
     });
     child.on('error', (e) => logger.warn(`Failed to launch hindsight-embed: ${e.message}`));
     child.on('exit', (code) => {

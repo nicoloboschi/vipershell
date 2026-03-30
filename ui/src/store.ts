@@ -69,6 +69,16 @@ export const activeTerminalSend    = { current: (_msg: Record<string, unknown>) 
 export const activeTerminalRefresh = { current: () => {} };
 export const activeTerminalScrollToLine = { current: (_line: number) => {} };
 
+// Registry for refreshing all terminal cells (including splits)
+const _terminalRefreshRegistry = new Map<string, () => void>();
+export function registerTerminalRefresh(id: string, fn: () => void) {
+  _terminalRefreshRegistry.set(id, fn);
+  return () => { _terminalRefreshRegistry.delete(id); };
+}
+export function refreshAllTerminals() {
+  for (const fn of _terminalRefreshRegistry.values()) fn();
+}
+
 // ── Command history ─────────────────────────────────────────────────────────
 export interface CommandEntry {
   cmd: string;

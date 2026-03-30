@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import useStore, { activeTerminalSend, activeTerminalRefresh } from './store';
+import useStore, { activeTerminalSend, refreshAllTerminals } from './store';
 import { requestNotificationPermission } from './utils';
 import { applyTheme } from './themes';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -19,7 +19,7 @@ import {
 } from './components/ui/dropdown-menu';
 import {
   Settings, ScrollText, Palette, ChevronDown, SquarePlus,
-  Home, Zap, TerminalSquare, BrainCircuit, RefreshCw,
+  Home, Zap, TerminalSquare, BrainCircuit, RefreshCw, ImagePlus,
 } from 'lucide-react';
 import DirectoryPicker from './components/DirectoryPicker';
 import { tildefy } from './utils';
@@ -213,6 +213,52 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
 
   const session  = currentSessionId ? sessionMap[currentSessionId] : undefined;
   const username = sessions.find(s => s.username)?.username;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !currentSessionId) return;
+    setUploadStatus(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}...`);
+    try {
+      // Get session CWD
+      let cwd = '/tmp';
+      try {
+        const res = await fetch(`/api/fs/${encodeURIComponent(currentSessionId)}/browse`);
+        const data = await res.json();
+        if (data.cwd) cwd = data.cwd;
+      } catch { /* fallback to /tmp */ }
+
+      const paths: string[] = [];
+      for (const file of files) {
+        setUploadStatus(`Uploading ${file.name} (${(file.size / 1024).toFixed(0)}KB)...`);
+        const res = await fetch(`/api/fs/upload?dir=${encodeURIComponent(cwd)}&name=${encodeURIComponent(file.name)}`, {
+          method: 'POST',
+          body: file,
+        });
+        const data = await res.json();
+        if (data.ok && data.path) {
+          paths.push(data.path);
+        } else {
+          setUploadStatus(`Failed: ${data.error || 'unknown error'}`);
+          setTimeout(() => setUploadStatus(null), 3000);
+          return;
+        }
+      }
+
+      if (paths.length > 0) {
+        const escaped = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+        activeTerminalSend.current({ type: 'input', data: escaped + ' ' });
+        setUploadStatus(`Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
+      }
+      setTimeout(() => setUploadStatus(null), 2000);
+    } catch (err) {
+      setUploadStatus(`Error: ${err}`);
+      setTimeout(() => setUploadStatus(null), 3000);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [currentSessionId]);
 
   return (
     <>
@@ -249,10 +295,28 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
             variant="ghost" size="icon"
             className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
             title="Refresh terminal"
-            onClick={() => activeTerminalRefresh.current()}
+            onClick={() => refreshAllTerminals()}
           >
             <RefreshCw size={14} />
           </Button>
+
+          <Button
+            variant="ghost" size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            title="Upload file"
+            disabled={!!uploadStatus}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <ImagePlus size={14} />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*,.pdf,.txt,.json,.csv,.log"
+            multiple
+            onChange={handleFileUpload}
+            style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden', pointerEvents: 'none' }}
+          />
 
           <DropdownMenu onOpenChange={(open) => { if (open) setCommands(loadCommands()); }}>
             <DropdownMenuTrigger asChild>
@@ -354,6 +418,13 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
           </div>
         )}
       </header>
+
+      {uploadStatus && (
+        <div className="md:hidden px-3 py-1.5 text-xs text-center border-b"
+          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}>
+          {uploadStatus}
+        </div>
+      )}
 
       {showSessions && (
         <>

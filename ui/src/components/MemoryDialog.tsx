@@ -232,7 +232,11 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                   <div className="flex items-center gap-2">
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${srv.active ? 'bg-green-500' : srv.hindsightEnabled ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
                     <span className="text-muted-foreground">
-                      API: {srv.active ? <span className="text-green-500 font-medium">active ({srv.mode ?? srv.hindsightMode})</span> : srv.hindsightEnabled ? <span className="text-yellow-500 font-medium">starting</span> : 'disabled'}
+                      API: {srv.active
+                        ? <span className="text-green-500 font-medium">active ({srv.mode ?? srv.hindsightMode})</span>
+                        : srv.hindsightEnabled
+                          ? <><span className="text-yellow-500 font-medium">stopped</span>{' '}<button className="text-xs underline text-blue-400 hover:text-blue-300" onClick={() => { fetch('/api/memory/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(srv) }).then(() => setTimeout(fetchConfig, 3000)); }}>restart</button></>
+                          : 'disabled'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

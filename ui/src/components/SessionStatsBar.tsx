@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, RefreshCw, List } from 'lucide-react';
-import useStore, { activeTerminalRefresh, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry } from '../store';
+import useStore, { refreshAllTerminals, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry } from '../store';
 import StatChips from './StatChips';
 import ClaudeIcon from './ClaudeIcon';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
@@ -245,8 +245,8 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           )}
           {activeTab === 'terminal' && (
             <button
-              title="Refresh terminal output"
-              onClick={() => activeTerminalRefresh.current()}
+              title="Refresh all terminals"
+              onClick={() => refreshAllTerminals()}
               className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5"
               style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
             >

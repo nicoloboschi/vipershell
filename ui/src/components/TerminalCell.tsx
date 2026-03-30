@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { ArrowDown, Upload } from 'lucide-react';
-import useStore, { activeTerminalSend, activeTerminalRefresh, activeTerminalScrollToLine, addCommandEntry } from '../store';
+import useStore, { activeTerminalSend, activeTerminalRefresh, activeTerminalScrollToLine, addCommandEntry, registerTerminalRefresh } from '../store';
 import { wsUrl } from '../serverUrl';
 
 const filterAltScreen = (data: string): string =>
@@ -46,20 +46,18 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
   // Output batching — accumulate chunks and flush once per animation frame
   const outputBufRef = useRef('');
-  const flushRafRef = useRef(0);
+  const flushRafRef = useRef<number>(0);
   const isRestoringRef = useRef(false);
-  // Track total bytes written to detect drift during sync checks
-  const bytesWrittenRef = useRef(0);
 
   // Create terminal once
   useEffect(() => {
     const isMobile = window.matchMedia('(max-width: 767px)').matches;
     const term = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !isMobile,
       fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
       fontSize: isMobile ? 11 : 14,
       lineHeight: 1.2,
-      scrollback: 5000,
+      scrollback: isMobile ? 1000 : 5000,
       theme: TERMINAL_THEME,
     });
     const fit = new FitAddon();
@@ -78,11 +76,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
     // Input handler — also tracks typed commands for the history TOC
     let inputBuf = '';
-    const dataDispose = term.onData((data: string) => {
-      if (/^\x1b\[[\?>][\d;]*c$/.test(data)) return;
-      sendRef.current({ type: 'input', data });
-
-      // Command accumulation (mirrors server-side logic)
+    function trackCommand(data: string) {
       for (const ch of data) {
         if (ch === '\r' || ch === '\n') {
           if (inputBuf.trim()) {
@@ -101,8 +95,43 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
         } else if (ch === '\t') {
           inputBuf += ' ';                  // approximate tab-completion
         }
-        // skip escape sequences, control chars, etc.
       }
+    }
+    function sendInput(data: string) {
+      if (/^\x1b\[[\?>][\d;]*c$/.test(data)) return;
+      sendRef.current({ type: 'input', data });
+      trackCommand(data);
+    }
+
+    // On mobile, Android's virtual keyboard uses IME composition for word
+    // prediction. xterm.js fires onData for EVERY intermediate composition
+    // state ("r","re","rep",...) AND the final text, causing massive duplication.
+    // Fix: track composition state on xterm's textarea, suppress onData during
+    // composition, and send only the final committed text.
+    let composing = false;
+    let mobileCleanup: (() => void) | null = null;
+
+    if (isMobile && el) {
+      const textarea = el.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+      if (textarea) {
+        const onCompStart = () => { composing = true; };
+        const onCompEnd = () => { composing = false; };
+        textarea.addEventListener('compositionstart', onCompStart);
+        textarea.addEventListener('compositionend', onCompEnd);
+        mobileCleanup = () => {
+          textarea.removeEventListener('compositionstart', onCompStart);
+          textarea.removeEventListener('compositionend', onCompEnd);
+        };
+      }
+    }
+
+    const dataDispose = term.onData((data: string) => {
+      if (isMobile && composing) {
+        // During composition, suppress all onData — we'll get the final
+        // text when compositionend fires and xterm emits it via onData.
+        return;
+      }
+      sendInput(data);
     });
 
     // Scroll position tracking — show "jump to bottom" when scrolled up
@@ -123,6 +152,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     });
 
     return () => {
+      mobileCleanup?.();
       scrollDispose.dispose();
       dataDispose.dispose();
       bellDispose.dispose();
@@ -161,11 +191,42 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     return () => provider.dispose();
   }, [onFileLinkClick]);
 
+  // Flush buffered output to xterm — batched per RAF on desktop, per 150ms timer on mobile
+  function flushOutput() {
+    flushRafRef.current = 0;
+    const batch = outputBufRef.current;
+    outputBufRef.current = '';
+    const t = termRef.current;
+    if (!t || !batch) return;
+    t.write(batch, () => {
+      if (isRestoringRef.current) {
+        isRestoringRef.current = false;
+        t.scrollToBottom();
+      }
+    });
+    const plain = stripAnsi(batch);
+    const urls = plain.match(URL_RE);
+    if (urls) {
+      const store = useStore.getState();
+      for (const url of urls) {
+        const clean = url.replace(/[.,;:!?)'"}\]]+$/, '');
+        store.addSessionUrl(sessionId, clean);
+      }
+    }
+  }
+
+  function scheduleFlush() {
+    if (!flushRafRef.current) {
+      flushRafRef.current = requestAnimationFrame(flushOutput);
+    }
+  }
+
   // WebSocket connection
   useEffect(() => {
     mountedRef.current = true;
     let ws: WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unregRefresh: (() => void) | null = null;
     let delay = 1000;
 
     function openWs(): void {
@@ -176,6 +237,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       sendRef.current = (msg: Record<string, unknown>) => {
         if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
       };
+      unregRefresh = registerTerminalRefresh(sessionId, () => sendRef.current({ type: 'connect', session_id: sessionId }));
 
       ws.onopen = () => {
         if (!mountedRef.current) return;
@@ -198,7 +260,6 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
         } else if (msg.type === 'connected') {
           pendingResetRef.current = true;
           isRestoringRef.current = true;
-          bytesWrittenRef.current = 0;
           const term = termRef.current;
           if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
         } else if (msg.type === 'output') {
@@ -208,44 +269,9 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             pendingResetRef.current = false;
             term.reset();
           }
-          bytesWrittenRef.current += (msg.data as string).length;
           const filtered = filterAltScreen(msg.data);
-          // Accumulate output and flush once per animation frame for smoother rendering
           outputBufRef.current += filtered;
-          if (!flushRafRef.current) {
-            flushRafRef.current = requestAnimationFrame(() => {
-              flushRafRef.current = 0;
-              const batch = outputBufRef.current;
-              outputBufRef.current = '';
-              const t = termRef.current;
-              if (!t || !batch) return;
-              t.write(batch, () => {
-                // After xterm finishes processing the batch, scroll to bottom
-                // if we're restoring a session (page refresh / reconnect).
-                if (isRestoringRef.current) {
-                  isRestoringRef.current = false;
-                  t.scrollToBottom();
-                }
-              });
-              // Extract URLs from the batched output
-              const plain = stripAnsi(batch);
-              const urls = plain.match(URL_RE);
-              if (urls) {
-                const store = useStore.getState();
-                for (const url of urls) {
-                  const clean = url.replace(/[.,;:!?)'"}\]]+$/, '');
-                  store.addSessionUrl(sessionId, clean);
-                }
-              }
-            });
-          }
-        } else if (msg.type === 'sync_snapshot') {
-          // Periodic consistency check: server sends total bytes sent since
-          // last connect. If our count differs, we've drifted — do a full refresh.
-          const serverBytes = msg.bytes_sent as number;
-          if (serverBytes !== bytesWrittenRef.current) {
-            sendRef.current({ type: 'connect', session_id: sessionId });
-          }
+          scheduleFlush();
         }
       };
 
@@ -260,18 +286,10 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
     openWs();
 
-    // Periodic consistency sync — ask the server for a snapshot hash every 30s.
-    // If the hash differs from what xterm is showing, do a full refresh.
-    const syncInterval = setInterval(() => {
-      if (ws?.readyState === WebSocket.OPEN) {
-        sendRef.current({ type: 'sync', session_id: sessionId });
-      }
-    }, 30_000);
-
     return () => {
       mountedRef.current = false;
       if (retryTimer) clearTimeout(retryTimer);
-      clearInterval(syncInterval);
+      if (unregRefresh) unregRefresh();
       if (ws) { ws.onclose = null; ws.close(); }
       if (flushRafRef.current) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = 0; }
       outputBufRef.current = '';

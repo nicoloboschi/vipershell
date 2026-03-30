@@ -63,8 +63,6 @@ interface ClientState {
   sessionId: string | null;
   unsubOutput: (() => void) | null;
   unsubSessions: (() => void) | null;
-  /** Total output bytes sent since last connect — used for sync checks */
-  bytesSent: number;
 }
 
 // ── Session connect logic (extracted for testability) ─────────────────────
@@ -143,7 +141,7 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws: WebSocket) => {
-    const state: ClientState = { sessionId: null, unsubOutput: null, unsubSessions: null, bytesSent: 0 };
+    const state: ClientState = { sessionId: null, unsubOutput: null, unsubSessions: null };
     logger.debug('WS client connected');
 
     // Subscribe to session list updates
@@ -176,19 +174,11 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             const sessionId = msg.session_id as string;
             state.unsubOutput?.();
             state.sessionId = sessionId;
-            state.bytesSent = 0;
-            // Wrap send to count output bytes for sync checks
-            const trackedSend = (m: BridgeMessage | object) => {
-              if ((m as any).type === 'output' && typeof (m as any).data === 'string') {
-                state.bytesSent += (m as any).data.length;
-              }
-              send(m);
-            };
             state.unsubOutput = await handleSessionConnect(sessionId, {
               pubsub: bridge.pubsub,
               snapshot: (id) => bridge.snapshot(id),
               connectSession: (id) => bridge.connectSession(id),
-              send: trackedSend,
+              send,
             });
             break;
           }
@@ -235,12 +225,6 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             break;
           }
 
-          case 'sync': {
-            // Respond with total bytes sent since last connect so the client
-            // can detect drift and trigger a full refresh if needed.
-            send({ type: 'sync_snapshot', bytes_sent: state.bytesSent });
-            break;
-          }
         }
       } catch (e) {
         logger.error(`WS handler error: ${e}`);
