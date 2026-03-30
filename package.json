@@ -1,6 +1,6 @@
 {
   "name": "vipershell",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Your machine, anywhere — View and interact with your tmux sessions from any browser",
   "type": "module",
   "bin": {
