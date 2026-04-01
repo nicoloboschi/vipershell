@@ -78,7 +78,7 @@ export default function NotesPane(): JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0d1117' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0c0c0c' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '6px 12px', borderBottom: '1px solid var(--border)',
@@ -96,12 +96,12 @@ export default function NotesPane(): JSX.Element {
         style={{
           flex: 1,
           resize: 'none',
-          background: '#0d1117',
-          color: '#c9d1d9',
+          background: '#0c0c0c',
+          color: '#d4d4d8',
           border: 'none',
           outline: 'none',
           padding: '12px 16px',
-          fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
+          fontFamily: '"JetBrains Mono", monospace',
           fontSize: 14,
           lineHeight: 1.6,
           tabSize: 2,

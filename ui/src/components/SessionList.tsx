@@ -1,29 +1,41 @@
+import { useState, useRef, useCallback } from 'react';
 import { StickyNote } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import SessionGroup from './SessionGroup';
 import { ScrollArea } from './ui/scroll-area';
-import { useGitRoots } from '../hooks/useGit';
 import { NOTES_SESSION_ID } from './PaneTerminal';
 
-const REPO_COLORS = [
-  '#58a6ff', '#3fb950', '#d29922', '#bc8cff',
-  '#ff7b72', '#79c0ff', '#ffa657', '#39d353',
-];
-
-function repoColor(gitRoot: string): string {
-  let h = 0;
-  for (let i = 0; i < gitRoot.length; i++) h = (Math.imul(h, 31) + gitRoot.charCodeAt(i)) >>> 0;
-  return REPO_COLORS[h % REPO_COLORS.length]!;
-}
-
-interface PathGroup {
-  path: string;
+interface Workspace {
+  key: string;
+  name: string;
   sessions: Session[];
 }
 
-interface RepoGroup {
-  gitRoot: string | null;
-  pathGroups: PathGroup[];
+function basename(p: string): string {
+  const parts = p.replace(/\/+$/, '').split('/');
+  return parts[parts.length - 1] || p;
+}
+
+const STORAGE_KEY = 'vipershell:workspace-order';
+
+function loadOrder(): string[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveOrder(order: string[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(order)); } catch { /* quota */ }
+}
+
+function sortWorkspaces(workspaces: Workspace[], storedOrder: string[]): Workspace[] {
+  if (storedOrder.length === 0) return workspaces;
+  const orderMap = new Map(storedOrder.map((key, i) => [key, i]));
+  return [...workspaces].sort((a, b) => {
+    const ai = orderMap.get(a.key) ?? Infinity;
+    const bi = orderMap.get(b.key) ?? Infinity;
+    if (ai === bi) return 0; // both unknown — keep natural order
+    return ai - bi;
+  });
 }
 
 interface SessionListProps {
@@ -37,7 +49,10 @@ export default function SessionList({ onConnect, send, id }: SessionListProps) {
   const splitIds = useStore(s => s.splitSessionIds);
   const sessions = allSessions.filter(s => !splitIds.has(s.id));
   const currentSessionId = useStore(s => s.currentSessionId);
-  const gitRoots = useGitRoots();
+
+  const [order, setOrder] = useState(loadOrder);
+  const draggedRef = useRef<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   if (!sessions.length) {
     return (
@@ -47,54 +62,67 @@ export default function SessionList({ onConnect, send, id }: SessionListProps) {
     );
   }
 
-  let groups: RepoGroup[];
-
-  if (gitRoots) {
-    const repoMap = new Map<string, Map<string, Session[]>>();
-    const noGitMap = new Map<string, Session[]>();
-
-    for (const s of sessions) {
-      const gitRoot = gitRoots[s.id] ?? null;
-      const path = s.path ?? '';
-      if (gitRoot) {
-        if (!repoMap.has(gitRoot)) repoMap.set(gitRoot, new Map());
-        const pm = repoMap.get(gitRoot)!;
-        if (!pm.has(path)) pm.set(path, []);
-        pm.get(path)!.push(s);
-      } else {
-        if (!noGitMap.has(path)) noGitMap.set(path, []);
-        noGitMap.get(path)!.push(s);
-      }
-    }
-
-    groups = [
-      ...Array.from(repoMap.entries()).map(([gitRoot, pathMap]) => ({
-        gitRoot,
-        pathGroups: Array.from(pathMap.entries()).map(([path, ss]) => ({ path, sessions: ss })),
-      })),
-      ...Array.from(noGitMap.entries()).map(([path, ss]) => ({
-        gitRoot: null,
-        pathGroups: [{ path, sessions: ss }],
-      })),
-    ];
-  } else {
-    const byPath = new Map<string, Session[]>();
-    for (const s of sessions) {
-      const key = s.path ?? '';
-      if (!byPath.has(key)) byPath.set(key, []);
-      byPath.get(key)!.push(s);
-    }
-    groups = Array.from(byPath.entries()).map(([path, ss]) => ({
-      gitRoot: null,
-      pathGroups: [{ path, sessions: ss }],
-    }));
+  // Group sessions into workspaces
+  const workspaceMap = new Map<string, Session[]>();
+  for (const s of sessions) {
+    const key = s.gitRoot ?? s.path ?? '';
+    if (!workspaceMap.has(key)) workspaceMap.set(key, []);
+    workspaceMap.get(key)!.push(s);
   }
+
+  const rawWorkspaces: Workspace[] = Array.from(workspaceMap.entries()).map(([key, ss]) => ({
+    key,
+    name: key ? basename(key) : 'Home',
+    sessions: ss,
+  }));
+
+  const workspaces = sortWorkspaces(rawWorkspaces, order);
+
+  // Drag handlers
+  const handleDragStart = (key: string) => {
+    draggedRef.current = key;
+  };
+
+  const handleDragOver = (e: React.DragEvent, key: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedRef.current && draggedRef.current !== key) {
+      setDragOverKey(key);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverKey(null);
+  };
+
+  const handleDrop = (targetKey: string) => {
+    const sourceKey = draggedRef.current;
+    setDragOverKey(null);
+    draggedRef.current = null;
+    if (!sourceKey || sourceKey === targetKey) return;
+
+    // Build new order from current visual order
+    const currentKeys = workspaces.map(w => w.key);
+    const fromIdx = currentKeys.indexOf(sourceKey);
+    const toIdx = currentKeys.indexOf(targetKey);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    currentKeys.splice(fromIdx, 1);
+    currentKeys.splice(toIdx, 0, sourceKey);
+
+    setOrder(currentKeys);
+    saveOrder(currentKeys);
+  };
+
+  const handleDragEnd = () => {
+    draggedRef.current = null;
+    setDragOverKey(null);
+  };
 
   const isNotesActive = currentSessionId === NOTES_SESSION_ID;
 
   return (
     <ScrollArea id={id} className="session-list flex-1 py-2">
-      <div className="session-section-label">Notes</div>
       <div
         onClick={() => onConnect(NOTES_SESSION_ID)}
         data-session-id={NOTES_SESSION_ID}
@@ -106,23 +134,25 @@ export default function SessionList({ onConnect, send, id }: SessionListProps) {
         <span className="session-name-inline">Notes</span>
       </div>
 
-      <div className="session-section-label" style={{ marginTop: 10 }}>Sessions</div>
+      <div className="session-section-label" style={{ marginTop: 10 }}>Workspaces</div>
 
-      {groups.map(({ gitRoot, pathGroups }) => {
-        const linked = pathGroups.length > 1;
-        const inner = pathGroups.map(({ path, sessions: ss }) => (
-          <SessionGroup
-            key={(gitRoot ?? '') + ':' + path}
-            path={path}
-            sessions={ss}
-            onConnect={onConnect}
-            send={send}
-          />
-        ));
-        return linked
-          ? <div key={gitRoot!} className="session-repo-group" style={{ '--repo-color': repoColor(gitRoot!) } as React.CSSProperties}>{inner}</div>
-          : <div key={(gitRoot ?? '') + ':' + pathGroups[0]?.path}>{inner}</div>;
-      })}
+      {workspaces.map(({ key, name, sessions: ss }) => (
+        <SessionGroup
+          key={key}
+          name={name}
+          path={ss[0]?.path ?? null}
+          sessions={ss}
+          onConnect={onConnect}
+          send={send}
+          workspaceKey={key}
+          isDragOver={dragOverKey === key}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onDragEnd={handleDragEnd}
+        />
+      ))}
     </ScrollArea>
   );
 }

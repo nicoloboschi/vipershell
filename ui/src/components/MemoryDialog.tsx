@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { BrainCircuit, ExternalLink, Check, Loader, RotateCw, Copy, Power, PowerOff, Trash2, ArrowUpCircle } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { ExternalLink, Check, Loader, RotateCw, Copy, Power, PowerOff, Trash2, ArrowUpCircle } from 'lucide-react';
+import ConfigDialog from './ConfigDialog';
 import { Button } from './ui/button';
 import ClaudeIcon from './ClaudeIcon';
+import OpenAIIcon from './OpenAIIcon';
+import HermesIcon from './HermesIcon';
 
-const TABS = ['Overview', 'API Server', 'Claude Code', 'Logs'] as const;
+const TABS = ['Overview', 'API Server', 'Claude Code', 'Codex', 'Hermes', 'Logs'] as const;
 type Tab = typeof TABS[number];
 
 const LLM_PROVIDERS = ['mock', 'openai', 'anthropic', 'groq', 'ollama', 'gemini', 'lmstudio', 'openai-codex'] as const;
@@ -53,7 +55,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 const INPUT = 'text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground';
 
-export default function MemoryDialog({ onClose }: MemoryDialogProps) {
+export function MemoryContent() {
   const [tab, setTab] = useState<Tab>('Overview');
 
   // Server config (requires restart)
@@ -82,10 +84,32 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
 
   const [cpError, setCpError] = useState('');
 
+  // Codex status
+  const [codexStatus, setCodexStatus] = useState<{
+    installed: boolean;
+    hooksEnabled: boolean;
+    pluginVersion: string;
+    userConfig: Record<string, unknown>;
+  } | null>(null);
+  const [codexState, setCodexState] = useState<AsyncState>('idle');
+  const [codexError, setCodexError] = useState('');
+
+  // Hermes status
+  const [hermesStatus, setHermesStatus] = useState<{
+    hermesInstalled: boolean;
+    pluginInstalled: boolean;
+    pluginVersion: string;
+    config: Record<string, unknown>;
+  } | null>(null);
+  const [hermesState, setHermesState] = useState<AsyncState>('idle');
+  const [hermesError, setHermesError] = useState('');
+
   useEffect(() => {
     fetch('/api/memory/config').then(r => r.json()).then(setSrv).catch(() => {});
     fetch('/api/memory/plugin-config').then(r => r.json()).then(setPlg).catch(() => {});
     fetch('/api/memory/claude-code-status').then(r => r.json()).then(setCcStatus).catch(() => {});
+    fetch('/api/memory/codex-status').then(r => r.json()).then(setCodexStatus).catch(() => {});
+    fetch('/api/memory/hermes-status').then(r => r.json()).then(setHermesStatus).catch(() => {});
   }, []);
 
   /* ── server actions ── */
@@ -195,17 +219,9 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
   /* ── render ── */
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[90vw] max-w-[520px] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-5 py-4 border-b border-border">
-          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
-            <BrainCircuit size={15} className="text-primary" />
-            Memory
-          </DialogTitle>
-        </DialogHeader>
-
-        {/* Tab bar */}
-        <div className="flex border-b border-border">
+    <>
+      {/* Tab bar */}
+      <div className="flex border-b border-border">
           {TABS.map(t => (
             <button
               key={t}
@@ -216,6 +232,8 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
               ].join(' ')}
             >
               {t === 'Claude Code' && <ClaudeIcon size={12} />}
+              {t === 'Codex' && <OpenAIIcon size={12} />}
+              {t === 'Hermes' && <HermesIcon size={12} />}
               {t}
             </button>
           ))}
@@ -235,7 +253,7 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
                       API: {srv.active
                         ? <span className="text-green-500 font-medium">active ({srv.mode ?? srv.hindsightMode})</span>
                         : srv.hindsightEnabled
-                          ? <><span className="text-yellow-500 font-medium">stopped</span>{' '}<button className="text-xs underline text-blue-400 hover:text-blue-300" onClick={() => { fetch('/api/memory/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(srv) }).then(() => setTimeout(fetchConfig, 3000)); }}>restart</button></>
+                          ? <><span className="text-yellow-500 font-medium">stopped</span>{' '}<button className="text-xs underline text-blue-400 hover:text-blue-300" onClick={() => { fetch('/api/memory/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(srv) }).then(() => setTimeout(() => fetch('/api/memory/config').then(r => r.json()).then(setSrv).catch(() => {}), 3000)); }}>restart</button></>
                           : 'disabled'}
                     </span>
                   </div>
@@ -464,18 +482,218 @@ export default function MemoryDialog({ onClose }: MemoryDialogProps) {
             </>
           )}
 
+          {/* ════════════════════════ CODEX ════════════════════════ */}
+          {tab === 'Codex' && (
+            <>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #10a37f 0%, #0e8f6e 100%)' }}>
+                  <OpenAIIcon size={22} className="brightness-0 invert" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Connect to Codex CLI</p>
+                  <p className="text-xs text-muted-foreground">Give OpenAI Codex persistent memory across sessions</p>
+                </div>
+              </div>
+
+              {/* Status */}
+              {codexStatus && (
+                <div className="rounded-md border border-border px-3 py-2.5 flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${codexStatus.installed && codexStatus.hooksEnabled ? 'bg-green-500' : codexStatus.installed ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-muted-foreground">
+                      Plugin: {codexStatus.installed
+                        ? (codexStatus.hooksEnabled
+                          ? <span className="text-green-500 font-medium">installed & enabled{codexStatus.pluginVersion ? ` (v${codexStatus.pluginVersion})` : ''}</span>
+                          : <span className="text-yellow-500 font-medium">installed (hooks not enabled in config.toml)</span>)
+                        : 'not installed'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {codexStatus?.installed ? (
+                <>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    The <strong className="text-foreground">Hindsight plugin for Codex</strong> is installed.
+                    Memories are automatically retained after conversations and recalled before each prompt.
+                  </p>
+                  {codexError && <p className="text-xs text-destructive break-words">{codexError}</p>}
+                  {codexState === 'ok' && <p className="text-xs text-green-500">Done.</p>}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={async () => {
+                      setCodexState('loading'); setCodexError('');
+                      try {
+                        const res = await fetch('/api/memory/codex-setup', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setCodexState('ok'); fetch('/api/memory/codex-status').then(r => r.json()).then(setCodexStatus).catch(() => {}); }
+                        else { setCodexState('error'); setCodexError(error || 'Unknown error'); }
+                      } catch { setCodexState('error'); setCodexError('Request failed'); }
+                    }} disabled={codexState === 'loading'}>
+                      {codexState === 'loading' ? <Loader size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />} Reinstall / Update
+                    </Button>
+                    <Button variant="outline" size="sm" className="flex items-center gap-2 text-destructive hover:text-destructive" onClick={async () => {
+                      setCodexState('loading'); setCodexError('');
+                      try {
+                        const res = await fetch('/api/memory/codex-uninstall', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setCodexState('ok'); fetch('/api/memory/codex-status').then(r => r.json()).then(setCodexStatus).catch(() => {}); }
+                        else { setCodexState('error'); setCodexError(error || 'Unknown error'); }
+                      } catch { setCodexState('error'); setCodexError('Request failed'); }
+                    }} disabled={codexState === 'loading'}>
+                      {codexState === 'loading' ? <Loader size={13} className="animate-spin" /> : <Trash2 size={13} />} Uninstall
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Install the <strong className="text-foreground">Hindsight plugin</strong> for OpenAI Codex CLI.
+                    It captures conversations and recalls relevant context &mdash; Codex gains memory across all sessions.
+                  </p>
+                  <div className="rounded-lg border border-border p-4 flex flex-col gap-3" style={{ background: 'var(--accent)' }}>
+                    <span className="text-xs font-semibold text-foreground">Install</span>
+                    {codexState === 'error' && <p className="text-xs text-destructive break-words">{codexError}</p>}
+                    <Button size="sm" className="self-start flex items-center gap-2" onClick={async () => {
+                      setCodexState('loading'); setCodexError('');
+                      try {
+                        const res = await fetch('/api/memory/codex-setup', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setCodexState('ok'); fetch('/api/memory/codex-status').then(r => r.json()).then(setCodexStatus).catch(() => {}); }
+                        else { setCodexState('error'); setCodexError(error || 'Unknown error'); }
+                      } catch { setCodexState('error'); setCodexError('Request failed'); }
+                    }} disabled={codexState === 'loading' || codexState === 'ok'}>
+                      {codexState === 'loading' && <Loader size={13} className="animate-spin" />}
+                      {codexState === 'ok' && <Check size={13} />}
+                      {codexState === 'loading' ? 'Installing\u2026' : codexState === 'ok' ? 'Installed' : 'Install Hindsight Plugin'}
+                    </Button>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold text-foreground">Or install manually</span>
+                    <pre className="text-[10px] text-muted-foreground bg-muted rounded-md px-3 py-2.5 leading-relaxed font-mono select-all whitespace-pre-wrap">curl -fsSL https://hindsight.vectorize.io/get-codex | bash</pre>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* ════════════════════════ HERMES ════════════════════════ */}
+          {tab === 'Hermes' && (
+            <>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }}>
+                  <HermesIcon size={22} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Connect to Hermes Agent</p>
+                  <p className="text-xs text-muted-foreground">Give Nous Research Hermes persistent memory across sessions</p>
+                </div>
+              </div>
+
+              {/* Status */}
+              {hermesStatus && (
+                <div className="rounded-md border border-border px-3 py-2.5 flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hermesStatus.pluginInstalled ? 'bg-green-500' : hermesStatus.hermesInstalled ? 'bg-yellow-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-muted-foreground">
+                      Hermes: {hermesStatus.hermesInstalled
+                        ? <span className="text-green-500 font-medium">installed</span>
+                        : 'not found'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hermesStatus.pluginInstalled ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-muted-foreground">
+                      Plugin: {hermesStatus.pluginInstalled
+                        ? <span className="text-green-500 font-medium">installed{hermesStatus.pluginVersion ? ` (v${hermesStatus.pluginVersion})` : ''}</span>
+                        : 'not installed'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {hermesError && <p className="text-xs text-destructive break-words">{hermesError}</p>}
+              {hermesState === 'ok' && <p className="text-xs text-green-500">Done.</p>}
+
+              {hermesStatus?.pluginInstalled ? (
+                <>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    The <strong className="text-foreground">Hindsight plugin for Hermes</strong> is installed.
+                    Memories are automatically retained after conversations and recalled before each prompt.
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={async () => {
+                      setHermesState('loading'); setHermesError('');
+                      try {
+                        const res = await fetch('/api/memory/hermes-setup', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setHermesState('ok'); fetch('/api/memory/hermes-status').then(r => r.json()).then(setHermesStatus).catch(() => {}); }
+                        else { setHermesState('error'); setHermesError(error || 'Unknown error'); }
+                      } catch { setHermesState('error'); setHermesError('Request failed'); }
+                    }} disabled={hermesState === 'loading'}>
+                      {hermesState === 'loading' ? <Loader size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />} Reinstall / Update
+                    </Button>
+                    <Button variant="outline" size="sm" className="flex items-center gap-2 text-destructive hover:text-destructive" onClick={async () => {
+                      setHermesState('loading'); setHermesError('');
+                      try {
+                        const res = await fetch('/api/memory/hermes-uninstall', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setHermesState('ok'); fetch('/api/memory/hermes-status').then(r => r.json()).then(setHermesStatus).catch(() => {}); }
+                        else { setHermesState('error'); setHermesError(error || 'Unknown error'); }
+                      } catch { setHermesState('error'); setHermesError('Request failed'); }
+                    }} disabled={hermesState === 'loading'}>
+                      {hermesState === 'loading' ? <Loader size={13} className="animate-spin" /> : <Trash2 size={13} />} Uninstall
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Install the <strong className="text-foreground">Hindsight plugin</strong> for Hermes Agent.
+                    It captures conversations and recalls relevant context &mdash; Hermes gains memory across all sessions.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <Button variant="default" size="sm" className="self-start flex items-center gap-2" onClick={async () => {
+                      setHermesState('loading'); setHermesError('');
+                      try {
+                        const res = await fetch('/api/memory/hermes-setup', { method: 'POST' });
+                        const { ok, error } = await res.json();
+                        if (ok) { setHermesState('ok'); fetch('/api/memory/hermes-status').then(r => r.json()).then(setHermesStatus).catch(() => {}); }
+                        else { setHermesState('error'); setHermesError(error || 'Unknown error'); }
+                      } catch { setHermesState('error'); setHermesError('Request failed'); }
+                    }} disabled={hermesState === 'loading' || hermesState === 'ok'}>
+                      {hermesState === 'loading' && <Loader size={13} className="animate-spin" />}
+                      {hermesState === 'ok' && <Check size={13} />}
+                      {hermesState === 'loading' ? 'Installing\u2026' : hermesState === 'ok' ? 'Installed' : 'Install Hindsight Plugin'}
+                    </Button>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold text-foreground">Or install manually</span>
+                    <pre className="text-[10px] text-muted-foreground bg-muted rounded-md px-3 py-2.5 leading-relaxed font-mono select-all whitespace-pre-wrap">uv pip install hindsight-hermes --python ~/.hermes/hermes-agent/venv/bin/python</pre>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
           {/* ════════════════════════ LOGS ════════════════════════ */}
           {tab === 'Logs' && (
             <div className="flex flex-col gap-2" style={{ margin: '-20px -20px -20px -20px' }}>
               <pre
                 ref={logRef}
                 className="font-mono text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-all"
-                style={{ height: 360, overflow: 'auto', padding: '12px 16px', background: '#0d1117', margin: 0, borderRadius: 0 }}
+                style={{ height: 360, overflow: 'auto', padding: '12px 16px', background: '#0c0c0c', margin: 0, borderRadius: 0 }}
               >{logText || 'Connecting\u2026'}</pre>
             </div>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    </div>
+    </>
+  );
+}
+
+export default function MemoryDialog({ onClose }: MemoryDialogProps) {
+  return (
+    <ConfigDialog open onClose={onClose}>
+      <MemoryContent />
+    </ConfigDialog>
   );
 }

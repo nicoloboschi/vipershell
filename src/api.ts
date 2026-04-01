@@ -13,11 +13,16 @@ import type { AIService } from './ai.js';
 
 const execAsync = promisify(exec);
 
+const PKG_VERSION: string = (() => {
+  try { return JSON.parse(readFileSync(nodePath.join(__dirname, '..', 'package.json'), 'utf-8')).version; }
+  catch { return 'unknown'; }
+})();
+
 export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory: MemoryStore, ai: AIService): Router {
   const router = Router();
 
   router.get('/version', (_req, res) => {
-    res.json({ version: '0.1.0' });
+    res.json({ version: PKG_VERSION });
   });
 
   router.get('/sessions', async (_req, res) => {
@@ -389,6 +394,9 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
         const untrackedOut = await run("git ls-files --others --exclude-standard");
         const untrackedFiles = untrackedOut.trim().split('\n').filter(Boolean);
         for (const file of untrackedFiles) {
+          // Skip binary files
+          const mimeEnc = await run(`file --mime-encoding ${sh(file)}`);
+          if (mimeEnc.includes('binary')) continue;
           const content = await run(`git diff --no-index /dev/null ${sh(file)}`);
           if (content) diff += '\n' + content;
         }
@@ -1084,6 +1092,156 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
+  // ── Codex plugin ──────────────────────────────────────────────────────────
+
+  router.get('/memory/codex-status', (_req, res) => {
+    const scriptsDir = nodePath.join(os.homedir(), '.hindsight', 'codex', 'scripts');
+    const hooksFile = nodePath.join(os.homedir(), '.codex', 'hooks.json');
+    const configToml = nodePath.join(os.homedir(), '.codex', 'config.toml');
+    const userConfig = nodePath.join(os.homedir(), '.hindsight', 'codex.json');
+    const settingsFile = nodePath.join(os.homedir(), '.hindsight', 'codex', 'settings.json');
+
+    const scriptsInstalled = existsSync(nodePath.join(scriptsDir, 'recall.py'));
+    const hooksConfigured = existsSync(hooksFile);
+    let hooksEnabled = false;
+    try {
+      const toml = readFileSync(configToml, 'utf-8');
+      hooksEnabled = /codex_hooks\s*=\s*true/.test(toml);
+    } catch { /* no config.toml */ }
+
+    let pluginVersion = '';
+    try {
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf-8'));
+      pluginVersion = settings.version ?? '';
+    } catch { /* no settings */ }
+
+    let userSettings: Record<string, unknown> = {};
+    try {
+      userSettings = JSON.parse(readFileSync(userConfig, 'utf-8'));
+    } catch { /* no user config */ }
+
+    res.json({
+      installed: scriptsInstalled && hooksConfigured,
+      hooksEnabled,
+      pluginVersion,
+      userConfig: userSettings,
+    });
+  });
+
+  router.post('/memory/codex-setup', async (_req, res) => {
+    try {
+      const { stdout, stderr } = await execAsync(
+        'curl -fsSL https://hindsight.vectorize.io/get-codex | bash -s -- --mode local',
+        { timeout: 60_000, env: { ...process.env, TERM: 'dumb' } }
+      );
+      res.json({ ok: true, output: stdout + stderr });
+    } catch (e: unknown) {
+      const err = e as { message?: string; stderr?: string };
+      res.json({ ok: false, error: err.stderr || err.message || String(e) });
+    }
+  });
+
+  router.post('/memory/codex-uninstall', async (_req, res) => {
+    try {
+      await execAsync(
+        'curl -fsSL https://hindsight.vectorize.io/get-codex | bash -s -- --uninstall',
+        { timeout: 30_000 }
+      );
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      res.json({ ok: false, error: err.message || String(e) });
+    }
+  });
+
+  // ── Hermes Agent plugin ──────────────────────────────────────────────────
+
+  const HERMES_VENV_PYTHON = nodePath.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'python');
+  const HERMES_CONFIG = nodePath.join(os.homedir(), '.hindsight', 'hermes.json');
+
+  router.get('/memory/hermes-status', async (_req, res) => {
+    const venvExists = existsSync(HERMES_VENV_PYTHON);
+    let pluginInstalled = false;
+    let pluginVersion = '';
+    if (venvExists) {
+      try {
+        const { stdout } = await execAsync(
+          `${HERMES_VENV_PYTHON} -c "import hindsight_hermes; print(hindsight_hermes.__version__)" 2>/dev/null`,
+          { timeout: 5000 }
+        );
+        pluginInstalled = true;
+        pluginVersion = stdout.trim();
+      } catch { /* not installed */ }
+    }
+
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(readFileSync(HERMES_CONFIG, 'utf-8'));
+    } catch { /* no config */ }
+
+    res.json({
+      hermesInstalled: venvExists,
+      pluginInstalled,
+      pluginVersion,
+      config,
+    });
+  });
+
+  router.post('/memory/hermes-setup', async (req, res) => {
+    if (!existsSync(HERMES_VENV_PYTHON)) {
+      return res.json({ ok: false, error: 'Hermes Agent not installed (~/.hermes/hermes-agent/venv/ not found). Install Hermes first: pip install hermes-agent' });
+    }
+    try {
+      // Install the hindsight-hermes plugin into Hermes's venv
+      const { stdout, stderr } = await execAsync(
+        `uv pip install hindsight-hermes --python ${HERMES_VENV_PYTHON}`,
+        { timeout: 60_000 }
+      );
+
+      // Write config pointing to vipershell's Hindsight proxy
+      const browserHost = req.headers.host?.split(':')[0] ?? '127.0.0.1';
+      const port = (req.headers.host?.split(':')[1]) ?? '4445';
+      const apiUrl = `http://${browserHost}:${port}/api/hindsight`;
+
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(readFileSync(HERMES_CONFIG, 'utf-8')); } catch { /* fresh */ }
+
+      const config = {
+        ...existing,
+        hindsightApiUrl: apiUrl,
+        bankId: existing.bankId ?? 'vipershell',
+        autoRecall: existing.autoRecall ?? true,
+        autoRetain: existing.autoRetain ?? true,
+        recallBudget: existing.recallBudget ?? 'mid',
+        recallMaxTokens: existing.recallMaxTokens ?? 4096,
+      };
+
+      mkdirSync(nodePath.dirname(HERMES_CONFIG), { recursive: true });
+      writeFileSync(HERMES_CONFIG, JSON.stringify(config, null, 2) + '\n');
+
+      res.json({ ok: true, output: stdout + stderr });
+    } catch (e: unknown) {
+      const err = e as { message?: string; stderr?: string };
+      res.json({ ok: false, error: err.stderr || err.message || String(e) });
+    }
+  });
+
+  router.post('/memory/hermes-uninstall', async (_req, res) => {
+    if (!existsSync(HERMES_VENV_PYTHON)) {
+      return res.json({ ok: true });
+    }
+    try {
+      await execAsync(
+        `uv pip uninstall hindsight-hermes --python ${HERMES_VENV_PYTHON}`,
+        { timeout: 30_000 }
+      );
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      res.json({ ok: false, error: err.message || String(e) });
+    }
+  });
+
   router.post('/memory/ui', async (req, res) => {
     if (!memory.active) return res.json({ active: false, url: null });
 
@@ -1110,7 +1268,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
     ai.saveConfig({
       aiEnabled: body.aiEnabled !== undefined ? Boolean(body.aiEnabled) : cfg.aiEnabled,
-      aiProvider: typeof body.aiProvider === 'string' && (body.aiProvider === 'claude-code' || body.aiProvider === 'codex')
+      aiProvider: typeof body.aiProvider === 'string' && (body.aiProvider === 'claude-code' || body.aiProvider === 'codex' || body.aiProvider === 'hermes')
         ? body.aiProvider : cfg.aiProvider,
       autoNaming: body.autoNaming !== undefined ? Boolean(body.autoNaming) : cfg.autoNaming,
       autoNamingIntervalSecs: typeof body.autoNamingIntervalSecs === 'number'

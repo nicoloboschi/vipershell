@@ -207,8 +207,7 @@ export class MemoryStore {
 
     this._startKeepalive(cfg);
     logger.info(`Hindsight memory ready (embedded) at ${this._resolvedUrl} (bank=${BANK_ID}, llm=${cfg.llmProvider})`);
-
-    // Auto-start control plane UI
+    // Start UI — either already running via daemon --ui flag, or spawned separately as fallback
     this.startUi().catch(() => {});
   }
 
@@ -232,17 +231,36 @@ export class MemoryStore {
 
   // ── Embedded daemon management ─────────────────────────────────────────────
 
-  private _startDaemon(_cfg: MemoryConfig): void {
+  private _daemonHasUiFlag = false;
+
+  private _startDaemon(cfg: MemoryConfig): void {
     logger.info('Starting Hindsight daemon via uvx hindsight-embed\u2026');
-    const child = spawn('uvx', ['hindsight-embed@latest', '-p', PROFILE, 'daemon', 'start'], {
-      stdio: 'ignore',
-      detached: false,
-      env: { ...process.env, HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: '0' },
-    });
-    child.on('error', (e) => logger.warn(`Failed to launch hindsight-embed: ${e.message}`));
-    child.on('exit', (code) => {
-      if (code !== 0 && code !== null) logger.warn(`hindsight-embed daemon start exited with code ${code}`);
-    });
+    // Try with --ui flag first; if it fails (exit code != 0), retry without
+    const baseArgs = ['hindsight-embed@latest', '-p', PROFILE, 'daemon', 'start'];
+    const uiArgs = [...baseArgs, '--ui', '--ui-port', String(cfg.uiPort), '--ui-hostname', '0.0.0.0'];
+
+    const tryStart = (args: string[], withUi: boolean) => {
+      const child = spawn('uvx', args, {
+        stdio: 'ignore',
+        detached: false,
+        env: { ...process.env, HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: '0' },
+      });
+      child.on('error', (e) => logger.warn(`Failed to launch hindsight-embed: ${e.message}`));
+      child.on('exit', (code) => {
+        if (code === 0 || code === null) {
+          this._daemonHasUiFlag = withUi;
+          return;
+        }
+        if (withUi) {
+          // --ui flag not supported — retry without it
+          logger.debug('hindsight-embed does not support --ui flag, retrying without');
+          tryStart(baseArgs, false);
+        } else {
+          logger.warn(`hindsight-embed daemon start exited with code ${code}`);
+        }
+      });
+    };
+    tryStart(uiArgs, true);
   }
 
   private async _stopDaemon(): Promise<void> {
@@ -282,6 +300,11 @@ export class MemoryStore {
           this._startedAt = null;
         }
       }
+      // Also ensure the control-plane UI stays alive
+      if (this.client && !(await this._isUiHealthy(cfg.uiPort))) {
+        logger.warn('Hindsight control-plane UI unreachable \u2014 restarting\u2026');
+        this.startUi().catch(() => {});
+      }
     }, KEEPALIVE_INTERVAL_MS);
   }
 
@@ -290,23 +313,44 @@ export class MemoryStore {
   }
 
   // ── Control-plane UI ────────────────────────────────────────────────────────
+  // The embedded daemon manages the UI lifecycle (--ui flag).
+  // For external mode, we still need to spawn the control plane separately.
 
-  async startUi(apiUrl?: string): Promise<string | null> {
+  async startUi(): Promise<string | null> {
     if (!this.client) return null;
     const cfg = this.getConfig();
-    this._stopUi();
-    this._killPort(cfg.uiPort);
+    const uiUrl = `http://127.0.0.1:${cfg.uiPort}`;
 
-    const url = apiUrl ?? this._resolvedUrl;
-    this.uiProcess = spawn('npx', [
-      '@vectorize-io/hindsight-control-plane',
-      '--api-url', url,
-      '--port', String(cfg.uiPort),
-      '--hostname', '0.0.0.0',
-    ], { stdio: 'ignore' });
-    this.uiProcess.on('error', (e) => logger.warn(`Hindsight UI error: ${e.message}`));
-    logger.info(`Hindsight control-plane UI started at http://127.0.0.1:${cfg.uiPort}`);
-    return `http://127.0.0.1:${cfg.uiPort}`;
+    // Already reachable — nothing to do
+    if (await this._isUiHealthy(cfg.uiPort)) return uiUrl;
+
+    if (this._mode === 'external' || !this._daemonHasUiFlag) {
+      // Spawn the control plane separately when:
+      // - External mode (daemon is managed externally)
+      // - Embedded daemon doesn't support --ui flag (older hindsight-embed)
+      this._stopUi();
+      this.uiProcess = spawn('npx', [
+        '@vectorize-io/hindsight-control-plane',
+        '--api-url', this._resolvedUrl,
+        '--port', String(cfg.uiPort),
+        '--hostname', '0.0.0.0',
+      ], { stdio: 'ignore' });
+      this.uiProcess.on('error', (e) => logger.warn(`Hindsight UI error: ${e.message}`));
+      logger.info(`Hindsight control-plane UI spawned at ${uiUrl}`);
+    }
+    return uiUrl;
+  }
+
+  private async _isUiHealthy(port: number): Promise<boolean> {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
+      return resp.ok;
+    } catch {
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
+        return resp.ok;
+      } catch { return false; }
+    }
   }
 
   private _stopUi(): void {
@@ -314,10 +358,6 @@ export class MemoryStore {
       try { this.uiProcess.kill(); } catch { /* ignore */ }
       this.uiProcess = null;
     }
-  }
-
-  private _killPort(port: number): void {
-    exec(`lsof -ti :${port} -sTCP:LISTEN | xargs kill -15 2>/dev/null || true`).unref?.();
   }
 
   // ── Memory operations ───────────────────────────────────────────────────────

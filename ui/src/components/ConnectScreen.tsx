@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Wifi, Loader2 } from 'lucide-react';
 import { getServerUrl } from '../serverUrl';
+import ViperIcon from './ViperIcon';
 
 interface ConnectScreenProps {
   onConnected: (serverUrl: string) => void;
@@ -43,17 +44,17 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#0d1117',
-        color: '#c9d1d9',
-        fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        background: '#0c0c0c',
+        color: '#d4d4d8',
+        fontFamily: "'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         padding: 24,
         gap: 24,
       }}
     >
       <div style={{ textAlign: 'center', marginBottom: 8 }}>
-        <div style={{ fontSize: 40, marginBottom: 8 }}>{'\u{1F40D}'}</div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#e6edf3' }}>vipershell</h1>
-        <p style={{ fontSize: 13, color: '#8b949e', margin: '6px 0 0' }}>Connect to your server</p>
+        <div style={{ marginBottom: 8 }}><ViperIcon size={40} color="#4ADE80" /></div>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: '#4ADE80', fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.5px' }}>vipershell</h1>
+        <p style={{ fontSize: 13, color: '#737373', margin: '6px 0 0' }}>Connect to your server</p>
       </div>
 
       <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -70,11 +71,11 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
               width: '100%',
               padding: '10px 12px 10px 34px',
               borderRadius: 8,
-              border: '1px solid #30363d',
-              background: '#161b22',
-              color: '#e6edf3',
+              border: '1px solid #222222',
+              background: '#111111',
+              color: '#F4F4F5',
               fontSize: 14,
-              fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+              fontFamily: '"JetBrains Mono",monospace',
               outline: 'none',
               boxSizing: 'border-box',
             }}
@@ -82,7 +83,7 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
         </div>
 
         {error && (
-          <p style={{ fontSize: 12, color: '#ff7b72', margin: 0, textAlign: 'center' }}>{error}</p>
+          <p style={{ fontSize: 12, color: '#F87171', margin: 0, textAlign: 'center' }}>{error}</p>
         )}
 
         <button
@@ -92,8 +93,8 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
             padding: '10px 0',
             borderRadius: 8,
             border: 'none',
-            background: testing ? '#1c2128' : '#58a6ff',
-            color: testing ? '#8b949e' : '#0d1117',
+            background: testing ? '#1a1a1a' : '#4ADE80',
+            color: testing ? '#737373' : '#0c0c0c',
             fontSize: 14,
             fontWeight: 600,
             cursor: testing ? 'default' : 'pointer',

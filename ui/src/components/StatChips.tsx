@@ -126,7 +126,7 @@ function StatWidget({ label, value, unit, history, color }: StatWidgetProps): Re
         <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
           {label}
         </span>
-        <span style={{ fontSize: 11, color, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 600, lineHeight: 1 }}>
+        <span style={{ fontSize: 11, color, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, lineHeight: 1 }}>
           {value}{unit}
         </span>
       </div>
@@ -143,7 +143,7 @@ interface CpuBarProps {
 
 function CpuBar({ pct }: CpuBarProps): React.ReactElement {
   const w: number = Math.min(100, pct);
-  const color: string = pct > 60 ? '#ff7b72' : pct > 25 ? '#d29922' : '#3fb950';
+  const color: string = pct > 95 ? 'var(--destructive)' : pct > 80 ? 'var(--warning)' : 'var(--primary)';
   return (
     <div style={{ width: 48, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)', flexShrink: 0 }}>
       <div style={{ width: `${w}%`, height: '100%', borderRadius: 2, background: color, transition: 'width 0.4s ease' }} />
@@ -206,7 +206,7 @@ function ProcessList({ processes, sessionId }: ProcessListProps): React.ReactEle
           }}>
             {/* Name */}
             <span style={{
-              fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+              fontFamily: '"JetBrains Mono",monospace',
               color: 'var(--foreground)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               fontSize: 11,
@@ -218,9 +218,9 @@ function ProcessList({ processes, sessionId }: ProcessListProps): React.ReactEle
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
               <CpuBar pct={p.cpu_percent} />
               <span style={{
-                fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                fontFamily: '"JetBrains Mono",monospace',
                 fontSize: 10, minWidth: 30, textAlign: 'right',
-                color: p.cpu_percent > 60 ? '#ff7b72' : p.cpu_percent > 25 ? '#d29922' : 'var(--muted-foreground)',
+                color: p.cpu_percent > 95 ? 'var(--destructive)' : p.cpu_percent > 80 ? 'var(--warning)' : 'var(--muted-foreground)',
               }}>
                 {p.cpu_percent.toFixed(0)}%
               </span>
@@ -228,7 +228,7 @@ function ProcessList({ processes, sessionId }: ProcessListProps): React.ReactEle
 
             {/* Mem */}
             <span style={{
-              fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+              fontFamily: '"JetBrains Mono",monospace',
               fontSize: 10, textAlign: 'right', color: 'var(--muted-foreground)',
             }}>
               {p.mem_mb >= 1024
@@ -238,7 +238,7 @@ function ProcessList({ processes, sessionId }: ProcessListProps): React.ReactEle
 
             {/* PID */}
             <span style={{
-              fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+              fontFamily: '"JetBrains Mono",monospace',
               fontSize: 10, textAlign: 'right', opacity: 0.4,
               color: 'var(--muted-foreground)',
             }}>
@@ -251,15 +251,15 @@ function ProcessList({ processes, sessionId }: ProcessListProps): React.ReactEle
               disabled={killing === p.pid}
               title={`Kill ${p.name} (${p.pid})`}
               style={{
-                fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                fontFamily: '"JetBrains Mono",monospace',
                 fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
                 padding: '2px 5px', borderRadius: 3,
                 background: 'none', border: '1px solid transparent',
                 cursor: killing === p.pid ? 'wait' : 'pointer',
-                color: '#ff7b72', opacity: killing === p.pid ? 0.4 : 0.65,
+                color: '#F87171', opacity: killing === p.pid ? 0.4 : 0.65,
                 flexShrink: 0, transition: 'opacity 0.15s, border-color 0.15s, background 0.15s',
               }}
-              onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = '#ff7b72'; e.currentTarget.style.background = 'rgba(255,123,114,0.1)'; }}
+              onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = '#F87171'; e.currentTarget.style.background = 'rgba(255,123,114,0.1)'; }}
               onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'none'; }}
             >
               KILL
@@ -350,7 +350,7 @@ function UrlList({ urls }: UrlListProps): React.ReactElement {
               {badge ? (
                 /* GitHub-style: big badge number + muted repo/type label */
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--primary)', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', flexShrink: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--primary)', fontFamily: '"JetBrains Mono",monospace', flexShrink: 0 }}>
                     {badge}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -363,7 +363,7 @@ function UrlList({ urls }: UrlListProps): React.ReactElement {
                   )}
                 </div>
               ) : (
-                <span style={{ fontSize: 12, color: 'var(--primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+                <span style={{ fontSize: 12, color: 'var(--primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"JetBrains Mono",monospace' }}>
                   {label}
                 </span>
               )}
@@ -387,7 +387,7 @@ interface GitDetailsProps {
 
 function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsProps): React.ReactElement {
   const Icon = git.detached ? GitCommitHorizontal : GitBranch;
-  const branchColor: string = git.dirty ? '#d29922' : '#3fb950';
+  const branchColor: string = git.dirty ? '#FACC15' : '#4ADE80';
   const [worktrees, refreshWorktrees] = useWorktrees(sessionId);
   const [wtLoading, setWtLoading] = useState<boolean>(false);
   const [wtError, setWtError] = useState<string | null>(null);
@@ -419,7 +419,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
     <div style={{ minWidth: 240, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <Icon size={13} style={{ color: branchColor, flexShrink: 0 }} />
-        <span style={{ fontSize: 13, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color: branchColor, fontWeight: 600 }}>
+        <span style={{ fontSize: 13, fontFamily: '"JetBrains Mono",monospace', color: branchColor, fontWeight: 600 }}>
           {git.branch}
         </span>
         {git.detached && (
@@ -448,7 +448,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
             // Show state/checks for the PR that matches the github hook
             const isHookPr = github?.prNum === pr.num;
             const prState = isHookPr ? github?.prState : null;
-            const prStateColor = prState === 'MERGED' ? '#a371f7' : prState === 'CLOSED' ? '#f85149' : '#3fb950';
+            const prStateColor = prState === 'MERGED' ? '#C084FC' : prState === 'CLOSED' ? '#F87171' : '#4ADE80';
             const checks = isHookPr ? github?.prChecks : null;
             const review = isHookPr ? github?.prReviewDecision : null;
             return (
@@ -465,7 +465,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
                 className="hover:bg-white/5"
               >
                 <GitPullRequest size={11} style={{ color: prStateColor, flexShrink: 0 }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: prStateColor, fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: prStateColor, fontFamily: '"JetBrains Mono",monospace' }}>
                   #{pr.num}
                 </span>
                 {prState && (
@@ -475,11 +475,11 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
                 )}
                 {checks && (() => {
                   const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : Clock;
-                  const checkColor = checks === 'PASS' ? '#3fb950' : checks === 'FAIL' ? '#f85149' : '#d29922';
+                  const checkColor = checks === 'PASS' ? '#4ADE80' : checks === 'FAIL' ? '#F87171' : '#FACC15';
                   return <CheckIcon size={10} strokeWidth={2.5} style={{ color: checkColor, flexShrink: 0 }} />;
                 })()}
                 {review && (
-                  <span style={{ fontSize: 9, color: review === 'APPROVED' ? '#3fb950' : review === 'CHANGES_REQUESTED' ? '#f85149' : '#d29922' }}>
+                  <span style={{ fontSize: 9, color: review === 'APPROVED' ? '#4ADE80' : review === 'CHANGES_REQUESTED' ? '#F87171' : '#FACC15' }}>
                     {review === 'APPROVED' ? 'approved' : review === 'CHANGES_REQUESTED' ? 'changes requested' : 'review needed'}
                   </span>
                 )}
@@ -494,9 +494,9 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--muted-foreground)' }}>
-        <Row label="Status" value={git.dirty ? 'Uncommitted changes' : 'Clean'} color={git.dirty ? '#d29922' : '#3fb950'} />
-        {git.ahead > 0  && <Row label="Ahead"  value={`${git.ahead} commit${git.ahead  > 1 ? 's' : ''}`} color="#58a6ff" />}
-        {git.behind > 0 && <Row label="Behind" value={`${git.behind} commit${git.behind > 1 ? 's' : ''}`} color="#ff7b72" />}
+        <Row label="Status" value={git.dirty ? 'Uncommitted changes' : 'Clean'} color={git.dirty ? '#FACC15' : '#4ADE80'} />
+        {git.ahead > 0  && <Row label="Ahead"  value={`${git.ahead} commit${git.ahead  > 1 ? 's' : ''}`} color="#4ADE80" />}
+        {git.behind > 0 && <Row label="Behind" value={`${git.behind} commit${git.behind > 1 ? 's' : ''}`} color="#F87171" />}
         {git.ahead === 0 && git.behind === 0 && !git.detached && (
           <Row label="Remote" value="Up to date" color="var(--muted-foreground)" />
         )}
@@ -538,7 +538,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
           >
             <GitFork size={10} style={{ flexShrink: 0, opacity: 0.6 }} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-              <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {wt.branch ?? wt.path.split('/').pop()}
               </span>
               <span style={{ fontSize: 9, opacity: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -547,7 +547,7 @@ function GitDetails({ git, github, sessionId, send, prUrls = [] }: GitDetailsPro
             </span>
           </button>
         ))}
-        {wtError && <span style={{ fontSize: 10, color: '#ff7b72' }}>{wtError}</span>}
+        {wtError && <span style={{ fontSize: 10, color: '#F87171' }}>{wtError}</span>}
       </div>
     </div>
   );
@@ -563,7 +563,7 @@ function Row({ label, value, color }: RowProps): React.ReactElement {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
       <span style={{ opacity: 0.6 }}>{label}</span>
-      <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color }}>{value}</span>
+      <span style={{ fontFamily: '"JetBrains Mono",monospace', color }}>{value}</span>
     </div>
   );
 }
@@ -595,7 +595,7 @@ function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
   const sessionUrls = useStore((s: any) => s.sessionUrls?.[sessionId] ?? EMPTY_URLS) as string[];
   if (!git) return null;
 
-  const branchColor: string = git.dirty ? '#d29922' : '#3fb950';
+  const branchColor: string = git.dirty ? '#FACC15' : '#4ADE80';
   // Collect PRs from session URLs (highest number first)
   const prUrls = extractPrUrls(sessionUrls);
   // Fall back to the github hook PR if no PR URLs detected in terminal output
@@ -621,18 +621,18 @@ function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 3, lineHeight: 1 }}>
               <GitBranch size={9} style={{ color: branchColor, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: branchColor, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
+              <span style={{ fontSize: 11, color: branchColor, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
                 {git.branch}
               </span>
-              {git.dirty && <span style={{ fontSize: 8, color: '#d29922', fontWeight: 700 }}>{'\u25CF'}</span>}
-              {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#58a6ff' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
-              {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#ff7b72' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
+              {git.dirty && <span style={{ fontSize: 8, color: '#FACC15', fontWeight: 700 }}>{'\u25CF'}</span>}
+              {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#4ADE80' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
+              {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#F87171' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
               {topPr && topPr.num > 0 && (() => {
                 const prState = github?.prState;
-                const prColor = prState === 'MERGED' ? '#a371f7' : prState === 'CLOSED' ? '#f85149' : '#3fb950';
+                const prColor = prState === 'MERGED' ? '#C084FC' : prState === 'CLOSED' ? '#F87171' : '#4ADE80';
                 const checks = github?.prChecks;
                 const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : checks === 'PENDING' ? Clock : null;
-                const checkColor = checks === 'PASS' ? '#3fb950' : checks === 'FAIL' ? '#f85149' : '#d29922';
+                const checkColor = checks === 'PASS' ? '#4ADE80' : checks === 'FAIL' ? '#F87171' : '#FACC15';
                 return (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: prColor }}>
                     <GitPullRequest size={8} strokeWidth={2} />#{topPr.num}
@@ -714,17 +714,20 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
               >
                 {hasStats && (
                   <>
-                    <StatWidget label="CPU" value={cpuVal!} unit="%" history={cpuH} color="#58a6ff" />
-                    <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#3fb950" />
+                    <StatWidget label="CPU" value={cpuVal!} unit="%" history={cpuH} color={Number(cpuVal!) >= 95 ? '#F87171' : Number(cpuVal!) >= 80 ? '#FACC15' : '#4ADE80'} />
+                    <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#4ADE80" />
                   </>
                 )}
                 {sessionUrls.length > 0 && (
-                  <span style={{
-                    display: 'flex', alignItems: 'center', gap: 3,
-                    fontSize: 10, color: '#58a6ff',
-                    fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontWeight: 600,
-                  }}>
-                    {sessionUrls.length} link{sessionUrls.length !== 1 ? 's' : ''}
+                  <span
+                    title="URLs detected in terminal output"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 10, color: '#4ADE80',
+                      fontFamily: '"JetBrains Mono",monospace', fontWeight: 600,
+                    }}
+                  >
+                    {sessionUrls.length} URL{sessionUrls.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </button>

@@ -1,74 +1,68 @@
-import { Plus, GitBranch, GitPullRequest } from 'lucide-react';
-import { tildefy } from '../utils';
+import { GripVertical, Plus } from 'lucide-react';
 import SessionItem from './SessionItem';
 import useStore, { type Session } from '../store';
 import { Button } from './ui/button';
-import { useGit, useGithubPR } from '../hooks/useGit';
 
-const PR_STATE_COLORS: Record<string, string> = {
-  OPEN: '#3fb950', MERGED: '#a371f7', CLOSED: '#f85149',
-};
+const PATH_COLORS = [
+  '#4ADE80', '#60A5FA', '#C084FC', '#F472B6',
+  '#FACC15', '#FB923C', '#2DD4BF', '#A78BFA',
+];
 
-function BranchBadge({ sessionId }: { sessionId: string }) {
-  const git = useGit(sessionId);
-  const github = useGithubPR(sessionId);
-  if (!git?.branch) return null;
-  const color = git.dirty ? '#d29922' : '#3fb950';
-  const pr = github?.prNum ? github : null;
-  const prColor = pr ? (PR_STATE_COLORS[pr.prState ?? ''] ?? '#8b949e') : '';
-  return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, fontSize: 9, fontFamily: '"Cascadia Code","JetBrains Mono",ui-monospace,monospace' }}>
-      <GitBranch size={8} strokeWidth={2} style={{ color }} />
-      <span style={{ color }}>{git.branch}</span>
-      {pr && (
-        <>
-          <span style={{ width: 1, height: 10, background: 'var(--border)', flexShrink: 0 }} />
-          <a
-            href={pr.prUrl ?? '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            style={{ display: 'flex', alignItems: 'center', gap: 2, color: prColor, textDecoration: 'none' }}
-            title={`PR #${pr.prNum} ${pr.prState?.toLowerCase() ?? ''}`}
-          >
-            <GitPullRequest size={8} strokeWidth={2} />
-            <span>#{pr.prNum}</span>
-          </a>
-        </>
-      )}
-    </span>
-  );
+function pathColor(path: string): string {
+  let h = 0;
+  for (let i = 0; i < path.length; i++) h = (Math.imul(h, 31) + path.charCodeAt(i)) >>> 0;
+  return PATH_COLORS[h % PATH_COLORS.length]!;
 }
 
 interface SessionGroupProps {
-  path: string;
+  name: string;
+  path: string | null;
   sessions: Session[];
   onConnect: (id: string) => void;
   send: (msg: Record<string, unknown>) => void;
+  workspaceKey: string;
+  isDragOver: boolean;
+  onDragStart: (key: string) => void;
+  onDragOver: (e: React.DragEvent, key: string) => void;
+  onDragLeave: () => void;
+  onDrop: (key: string) => void;
+  onDragEnd: () => void;
 }
 
-export default function SessionGroup({ path, sessions, onConnect, send }: SessionGroupProps) {
+export default function SessionGroup({ name, path, sessions, onConnect, send, workspaceKey, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }: SessionGroupProps) {
   const currentSessionId = useStore(s => s.currentSessionId);
 
-  const fullPath = path ? tildefy(path, sessions[0]?.username) : 'Other';
-  const displayPath = (() => {
-    if (!path || !fullPath || fullPath.length <= 24) return fullPath;
-    const parts = fullPath.split('/');
-    if (parts.length <= 3) return fullPath;
-    return parts[0] + '/\u2026/' + parts[parts.length - 1];
-  })();
+  const uniquePaths = new Set(sessions.map(s => s.path ?? ''));
+  const showPathDots = uniquePaths.size > 1;
 
   const handleAddSession = () => {
     send({ type: 'create_session', path: path || null });
   };
 
   return (
-    <div>
-      <div className="session-group-header">
-        <span className="session-group-label" title={fullPath ?? undefined}>
-          {displayPath}
+    <div className="session-workspace">
+      <div
+        className="session-group-header"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', workspaceKey);
+          onDragStart(workspaceKey);
+        }}
+        onDragOver={(e) => onDragOver(e, workspaceKey)}
+        onDragLeave={onDragLeave}
+        onDrop={(e) => { e.preventDefault(); onDrop(workspaceKey); }}
+        onDragEnd={onDragEnd}
+        style={{
+          cursor: 'grab',
+          borderTop: isDragOver ? '2px solid var(--primary)' : '2px solid transparent',
+          transition: 'border-color 0.15s',
+        }}
+      >
+        <GripVertical size={10} style={{ color: 'var(--muted-foreground)', opacity: 0.3, flexShrink: 0 }} />
+        <span className="session-group-label" title={path ?? undefined}>
+          {name}
         </span>
-        <BranchBadge sessionId={sessions[0]?.id ?? ''} />
         <Button
           variant="ghost"
           size="icon"
@@ -85,6 +79,7 @@ export default function SessionGroup({ path, sessions, onConnect, send }: Sessio
           session={session}
           isActive={session.id === currentSessionId}
           onConnect={onConnect}
+          pathDotColor={showPathDots ? pathColor(session.path ?? '') : undefined}
         />
       ))}
     </div>

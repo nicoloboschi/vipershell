@@ -17,12 +17,12 @@ const URL_RE = /https?:\/\/[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9](?::\d+)?(?:\/[^\
 const stripAnsi = (s: string) => s.replace(/\x1b(?:\[[0-9;]*[a-zA-Z]|\].*?(?:\x07|\x1b\\))/g, '');
 
 const TERMINAL_THEME = {
-  background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', cursorAccent: '#0d1117',
-  selectionBackground: 'rgba(88,166,255,0.3)',
-  black: '#484f58', brightBlack: '#6e7681', red: '#ff7b72', brightRed: '#ffa198',
-  green: '#3fb950', brightGreen: '#56d364', yellow: '#d29922', brightYellow: '#e3b341',
-  blue: '#58a6ff', brightBlue: '#79c0ff', magenta: '#bc8cff', brightMagenta: '#d2a8ff',
-  cyan: '#39c5cf', brightCyan: '#56d4dd', white: '#b1bac4', brightWhite: '#f0f6fc',
+  background: '#0c0c0c', foreground: '#d4d4d8', cursor: '#4ADE80', cursorAccent: '#0c0c0c',
+  selectionBackground: 'rgba(74,222,128,0.25)',
+  black: '#3B3B3B', brightBlack: '#525252', red: '#F87171', brightRed: '#FCA5A5',
+  green: '#4ADE80', brightGreen: '#86EFAC', yellow: '#FACC15', brightYellow: '#FDE68A',
+  blue: '#60A5FA', brightBlue: '#93C5FD', magenta: '#C084FC', brightMagenta: '#D8B4FE',
+  cyan: '#22D3EE', brightCyan: '#67E8F9', white: '#D4D4D8', brightWhite: '#F4F4F5',
 };
 
 interface TerminalCellProps {
@@ -54,7 +54,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     const isMobile = window.matchMedia('(max-width: 767px)').matches;
     const term = new Terminal({
       cursorBlink: !isMobile,
-      fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
+      fontFamily: '"JetBrains Mono", monospace',
       fontSize: isMobile ? 11 : 14,
       lineHeight: 1.2,
       scrollback: isMobile ? 1000 : 5000,
@@ -522,7 +522,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       style={{
         position: 'relative',
         display: 'flex', flexDirection: 'column',
-        background: '#0d1117', overflow: 'hidden',
+        background: '#0c0c0c', overflow: 'hidden',
         outline: dragOver ? '2px solid var(--primary)' : isActive ? '1px solid var(--primary)' : '1px solid transparent',
         outlineOffset: -1,
       }}

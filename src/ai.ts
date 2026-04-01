@@ -46,7 +46,7 @@ function simpleHash(s: string): string {
 
 const CONFIG_PATH = join(homedir(), '.config', 'vipershell', 'config.json');
 
-export type AIProvider = 'claude-code' | 'codex';
+export type AIProvider = 'claude-code' | 'codex' | 'hermes';
 
 export interface AIConfig {
   aiEnabled: boolean;

@@ -112,21 +112,21 @@ function HunkView({ hunk }: HunkViewProps) {
     if (line.type !== 'del') nw++;
   }
   return (
-    <div style={{ fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace', fontSize: 12 }}>
-      <div style={{ display: 'flex', gap: 8, padding: '2px 12px', background: '#1b2d41', borderBottom: '1px solid #30363d' }}>
-        <span style={{ color: '#79c0ff', userSelect: 'none' }}>{hunk.header}</span>
-        {hunk.context && <span style={{ color: '#6e7681' }}>{hunk.context}</span>}
+    <div style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 12 }}>
+      <div style={{ display: 'flex', gap: 8, padding: '2px 12px', background: '#1b2d41', borderBottom: '1px solid #222222' }}>
+        <span style={{ color: '#93C5FD', userSelect: 'none' }}>{hunk.header}</span>
+        {hunk.context && <span style={{ color: '#525252' }}>{hunk.context}</span>}
       </div>
       {rows.map((row, i) => {
         const isAdd = row.type === 'add', isDel = row.type === 'del';
         return (
-          <div key={i} style={{ display: 'flex', background: isAdd ? '#0d2818' : isDel ? '#2d0f0f' : 'transparent', borderBottom: '1px solid #0d1117' }}>
-            <div style={{ width: 44, padding: '1px 8px', textAlign: 'right', color: '#6e7681', userSelect: 'none', flexShrink: 0, borderRight: '1px solid #30363d' }}>{row.oldNum ?? ''}</div>
-            <div style={{ width: 44, padding: '1px 8px', textAlign: 'right', color: '#6e7681', userSelect: 'none', flexShrink: 0, borderRight: '1px solid #30363d' }}>{row.newNum ?? ''}</div>
-            <div style={{ width: 20, padding: '1px 4px', textAlign: 'center', color: isAdd ? '#3fb950' : isDel ? '#ff7b72' : '#6e7681', userSelect: 'none', flexShrink: 0 }}>
+          <div key={i} style={{ display: 'flex', background: isAdd ? '#0d2818' : isDel ? '#2d0f0f' : 'transparent', borderBottom: '1px solid #0c0c0c' }}>
+            <div style={{ width: 44, padding: '1px 8px', textAlign: 'right', color: '#525252', userSelect: 'none', flexShrink: 0, borderRight: '1px solid #222222' }}>{row.oldNum ?? ''}</div>
+            <div style={{ width: 44, padding: '1px 8px', textAlign: 'right', color: '#525252', userSelect: 'none', flexShrink: 0, borderRight: '1px solid #222222' }}>{row.newNum ?? ''}</div>
+            <div style={{ width: 20, padding: '1px 4px', textAlign: 'center', color: isAdd ? '#4ADE80' : isDel ? '#F87171' : '#525252', userSelect: 'none', flexShrink: 0 }}>
               {isAdd ? '+' : isDel ? '-' : ' '}
             </div>
-            <pre style={{ margin: 0, padding: '1px 8px 1px 0', color: isAdd ? '#aff5b4' : isDel ? '#ffdcd7' : '#c9d1d9', whiteSpace: 'pre-wrap', wordBreak: 'break-all', flex: 1, minWidth: 0 }}>
+            <pre style={{ margin: 0, padding: '1px 8px 1px 0', color: isAdd ? '#aff5b4' : isDel ? '#ffdcd7' : '#d4d4d8', whiteSpace: 'pre-wrap', wordBreak: 'break-all', flex: 1, minWidth: 0 }}>
               {row.content}
             </pre>
           </div>
@@ -157,8 +157,8 @@ function FilePreview({ absPath }: FilePreviewProps) {
   }, [absPath]); // eslint-disable-line
 
   if (img) return <img src={`/api/fs/raw?path=${encodeURIComponent(absPath)}`} alt="" style={{ maxWidth: '100%', padding: 12 }} />;
-  if (error) return <div style={{ padding: 12, color: '#ff7b72', fontSize: 12 }}>{error}</div>;
-  if (content === null) return <div style={{ padding: 12, color: '#6e7681', fontSize: 12 }}>Loading…</div>;
+  if (error) return <div style={{ padding: 12, color: '#F87171', fontSize: 12 }}>{error}</div>;
+  if (content === null) return <div style={{ padding: 12, color: '#525252', fontSize: 12 }}>Loading…</div>;
   if (md) return (
     <div style={{ padding: '12px 20px', overflow: 'auto' }}>
       <div className="md-preview"><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></div>
@@ -172,7 +172,7 @@ function FilePreview({ absPath }: FilePreviewProps) {
         showLineNumbers
         wrapLongLines
         lineNumberStyle={{ minWidth: '3em', paddingRight: 12, color: '#484f58', userSelect: 'none' }}
-        customStyle={{ margin: 0, padding: '8px 0', background: '#0d1117', fontSize: 12, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace' }}
+        customStyle={{ margin: 0, padding: '8px 0', background: '#0c0c0c', fontSize: 12, fontFamily: '"JetBrains Mono",monospace' }}
       >
         {content}
       </SyntaxHighlighter>
@@ -193,27 +193,27 @@ function FileBlock({ file, gitRoot, isFocused }: FileBlockProps) {
   const absPath = gitRoot ? `${gitRoot}/${displayPath}` : null;
 
   return (
-    <div data-file={displayPath} style={{ border: `1px solid ${isFocused ? '#58a6ff' : '#30363d'}`, borderRadius: 6, marginBottom: 12, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', background: '#161b22', borderBottom: (collapsed && !preview) ? 'none' : '1px solid #30363d' }}>
+    <div data-file={displayPath} style={{ border: `1px solid ${isFocused ? '#4ADE80' : '#222222'}`, borderRadius: 6, marginBottom: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', background: '#111111', borderBottom: (collapsed && !preview) ? 'none' : '1px solid #222222' }}>
         <div onClick={() => setCollapsed(c => !c)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: 'pointer', userSelect: 'none', minWidth: 0 }}>
-          {collapsed ? <ChevronRight size={13} color="#6e7681" style={{ flexShrink: 0 }} /> : <ChevronDown size={13} color="#6e7681" style={{ flexShrink: 0 }} />}
-          {file.isNew ? <FilePlus size={13} color="#3fb950" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={13} color="#ff7b72" style={{ flexShrink: 0 }} /> : <FileCode size={13} color="#6e7681" style={{ flexShrink: 0 }} />}
-          <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 12, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {displayPath}
+          {collapsed ? <ChevronRight size={13} color="#525252" style={{ flexShrink: 0 }} /> : <ChevronDown size={13} color="#525252" style={{ flexShrink: 0 }} />}
+          {file.isNew ? <FilePlus size={13} color="#4ADE80" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={13} color="#F87171" style={{ flexShrink: 0 }} /> : <FileCode size={13} color="#525252" style={{ flexShrink: 0 }} />}
+          <span title={displayPath} style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 12, color: '#F4F4F5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl', textAlign: 'left', minWidth: 0 }}>
+            <bdi>{displayPath}</bdi>
           </span>
         </div>
         {!file.isBinary && (
-          <span style={{ fontFamily: 'monospace', fontSize: 12, flexShrink: 0 }}>
-            {file.additions > 0 && <span style={{ color: '#3fb950' }}>+{file.additions}</span>}
-            {file.additions > 0 && file.deletions > 0 && <span style={{ color: '#6e7681' }}> </span>}
-            {file.deletions > 0 && <span style={{ color: '#ff7b72' }}>-{file.deletions}</span>}
+          <span title={`${file.additions} line${file.additions !== 1 ? 's' : ''} added, ${file.deletions} line${file.deletions !== 1 ? 's' : ''} removed`} style={{ fontFamily: 'monospace', fontSize: 12, flexShrink: 0 }}>
+            {file.additions > 0 && <span style={{ color: '#4ADE80' }}>+{file.additions}</span>}
+            {file.additions > 0 && file.deletions > 0 && <span style={{ color: '#525252' }}> </span>}
+            {file.deletions > 0 && <span style={{ color: '#F87171' }}>-{file.deletions}</span>}
           </span>
         )}
         {absPath && !file.isDeleted && (
           <button
-            title="Toggle preview"
+            title="Toggle full file preview"
             onClick={(e: React.MouseEvent<HTMLElement>) => { e.stopPropagation(); setPreview(p => !p); setCollapsed(false); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: preview ? '#79c0ff' : '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: preview ? '#93C5FD' : '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
           >
             <Eye size={12} />
           </button>
@@ -223,7 +223,7 @@ function FileBlock({ file, gitRoot, isFocused }: FileBlockProps) {
         preview && absPath
           ? <FilePreview absPath={absPath} />
           : file.isBinary
-            ? <div style={{ padding: '10px 14px', color: '#6e7681', fontSize: 12, fontStyle: 'italic' }}>Binary file changed</div>
+            ? <div style={{ padding: '10px 14px', color: '#525252', fontSize: 12, fontStyle: 'italic' }}>Binary file changed</div>
             : file.hunks.map((hunk, i) => <HunkView key={i} hunk={hunk} />)
       )}
     </div>
@@ -245,8 +245,8 @@ function StatBar({ add, del }: StatBarProps) {
   const redN = BLOCKS - greenN;
   return (
     <span style={{ display: 'inline-flex', gap: 1, flexShrink: 0 }}>
-      {Array.from({ length: greenN }).map((_, i) => <span key={`g${i}`} style={{ width: 8, height: 8, borderRadius: 1, background: '#3fb950', display: 'inline-block' }} />)}
-      {Array.from({ length: redN }).map((_, i) => <span key={`r${i}`} style={{ width: 8, height: 8, borderRadius: 1, background: '#ff7b72', display: 'inline-block' }} />)}
+      {Array.from({ length: greenN }).map((_, i) => <span key={`g${i}`} style={{ width: 8, height: 8, borderRadius: 1, background: '#4ADE80', display: 'inline-block' }} />)}
+      {Array.from({ length: redN }).map((_, i) => <span key={`r${i}`} style={{ width: 8, height: 8, borderRadius: 1, background: '#F87171', display: 'inline-block' }} />)}
     </span>
   );
 }
@@ -282,15 +282,15 @@ function FileSidebar({ files, focusedIndex, onJump, onSelect, onOpenFile }: File
   })();
 
   return (
-    <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #30363d', overflowY: 'auto', background: '#0d1117' }}>
-      <div style={{ padding: '6px 10px', borderBottom: '1px solid #30363d', background: '#161b22', fontSize: 11, color: '#6e7681', display: 'flex', gap: 6, alignItems: 'center' }}>
+    <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #222222', overflowY: 'auto', background: '#0c0c0c' }}>
+      <div style={{ padding: '6px 10px', borderBottom: '1px solid #222222', background: '#111111', fontSize: 11, color: '#525252', display: 'flex', gap: 6, alignItems: 'center' }}>
         <span>{files.length} file{files.length !== 1 ? 's' : ''}</span>
-        <span style={{ color: '#3fb950' }}>+{totalAdd}</span>
-        <span style={{ color: '#ff7b72' }}>-{totalDel}</span>
+        <span style={{ color: '#4ADE80' }}>+{totalAdd}</span>
+        <span style={{ color: '#F87171' }}>-{totalDel}</span>
       </div>
       {grouped.map(([dir, entries]) => (
         <div key={dir}>
-          <div style={{ padding: '5px 10px 3px', fontSize: 10, color: '#6e7681', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#0d1117', borderBottom: '1px solid #161b22', position: 'sticky', top: 0, zIndex: 1 }}>
+          <div style={{ padding: '5px 10px 3px', fontSize: 10, color: '#525252', fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#0c0c0c', borderBottom: '1px solid #111111', position: 'sticky', top: 0, zIndex: 1 }}>
             {dir}
           </div>
           {entries.map(({ file, index, name }) => {
@@ -301,23 +301,27 @@ function FileSidebar({ files, focusedIndex, onJump, onSelect, onOpenFile }: File
                 key={index}
                 onClick={() => { onSelect(index); onJump(path); }}
                 style={{
-                  padding: '4px 10px 4px 18px', cursor: 'pointer', borderBottom: '1px solid #161b22',
+                  padding: '4px 10px 4px 18px', cursor: 'pointer', borderBottom: '1px solid #111111',
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: isFocused ? '#1f3a56' : 'transparent',
-                  borderLeft: isFocused ? '2px solid #58a6ff' : '2px solid transparent',
+                  borderLeft: isFocused ? '2px solid #4ADE80' : '2px solid transparent',
                 }}
-                onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = '#161b22'; }}
+                onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = '#111111'; }}
                 onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = 'transparent'; }}
               >
-                {file.isNew ? <FilePlus size={11} color="#3fb950" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={11} color="#ff7b72" style={{ flexShrink: 0 }} /> : <FileCode size={11} color="#6e7681" style={{ flexShrink: 0 }} />}
-                <span style={{ fontSize: 12, color: '#e6edf3', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
-                <StatBar add={file.additions} del={file.deletions} />
+                {file.isNew ? <FilePlus size={11} color="#4ADE80" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={11} color="#F87171" style={{ flexShrink: 0 }} /> : <FileCode size={11} color="#525252" style={{ flexShrink: 0 }} />}
+                <span style={{ fontSize: 12, color: '#F4F4F5', fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1, minWidth: 0, direction: 'rtl', textOverflow: 'ellipsis', textAlign: 'left' }}>
+                  <bdi>{name}</bdi>
+                </span>
+                <span title={`${file.additions} addition${file.additions !== 1 ? 's' : ''}, ${file.deletions} deletion${file.deletions !== 1 ? 's' : ''}`}>
+                  <StatBar add={file.additions} del={file.deletions} />
+                </span>
                 {onOpenFile && (
                   <button
-                    title="Open in Files"
+                    title="Open in Files tab"
                     onClick={(e) => { e.stopPropagation(); onOpenFile(path); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#79c0ff'; }}
+                    onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#93C5FD'; }}
                     onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#484f58'; }}
                   >
                     <FolderOpen size={11} />
@@ -356,11 +360,11 @@ function CommitList({ sessionId, base, selected, onSelect }: CommitListProps) {
       .finally(() => setLoading(false));
   }, [sessionId, base]); // eslint-disable-line
 
-  if (loading) return <div style={{ width: 260, padding: 12, color: '#6e7681', fontSize: 12, borderRight: '1px solid #30363d' }}>Loading…</div>;
+  if (loading) return <div style={{ width: 260, padding: 12, color: '#525252', fontSize: 12, borderRight: '1px solid #222222' }}>Loading…</div>;
 
   return (
-    <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid #30363d', overflowY: 'auto', background: '#0d1117' }}>
-      <div style={{ padding: '6px 10px', borderBottom: '1px solid #30363d', background: '#161b22', fontSize: 11, color: '#6e7681' }}>
+    <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid #222222', overflowY: 'auto', background: '#0c0c0c' }}>
+      <div style={{ padding: '6px 10px', borderBottom: '1px solid #222222', background: '#111111', fontSize: 11, color: '#525252' }}>
         {commits.length} commit{commits.length !== 1 ? 's' : ''}
       </div>
       {commits.length === 0 && (
@@ -370,17 +374,17 @@ function CommitList({ sessionId, base, selected, onSelect }: CommitListProps) {
         <div
           key={c.hash}
           onClick={() => onSelect(c.hash)}
-          style={{ padding: '7px 10px', cursor: 'pointer', borderBottom: '1px solid #161b22', background: selected === c.hash ? '#1f3a56' : 'transparent' }}
-          onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (selected !== c.hash) e.currentTarget.style.background = '#161b22'; }}
+          style={{ padding: '7px 10px', cursor: 'pointer', borderBottom: '1px solid #111111', background: selected === c.hash ? '#1f3a56' : 'transparent' }}
+          onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (selected !== c.hash) e.currentTarget.style.background = '#111111'; }}
           onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { if (selected !== c.hash) e.currentTarget.style.background = 'transparent'; }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-            <GitCommitHorizontal size={11} color="#58a6ff" style={{ flexShrink: 0 }} />
-            <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 11, color: '#79c0ff', flexShrink: 0 }}>{c.short}</span>
-            <span style={{ fontSize: 10, color: '#6e7681', flexShrink: 0, marginLeft: 'auto' }}>{c.relDate}</span>
+            <GitCommitHorizontal size={11} color="#4ADE80" style={{ flexShrink: 0 }} />
+            <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 11, color: '#93C5FD', flexShrink: 0 }}>{c.short}</span>
+            <span style={{ fontSize: 10, color: '#525252', flexShrink: 0, marginLeft: 'auto' }}>{c.relDate}</span>
           </div>
-          <div style={{ fontSize: 12, color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: 17 }}>{c.subject}</div>
-          <div style={{ fontSize: 10, color: '#6e7681', paddingLeft: 17 }}>{c.author}</div>
+          <div style={{ fontSize: 12, color: '#d4d4d8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: 17 }}>{c.subject}</div>
+          <div style={{ fontSize: 10, color: '#525252', paddingLeft: 17 }}>{c.author}</div>
         </div>
       ))}
     </div>
@@ -402,7 +406,7 @@ function FullLog({ sessionId }: { sessionId: string }) {
       .finally(() => setLoading(false));
   }, [sessionId]);
 
-  if (loading) return <div style={{ padding: 16, color: '#6e7681', fontSize: 12 }}>Loading…</div>;
+  if (loading) return <div style={{ padding: 16, color: '#525252', fontSize: 12 }}>Loading…</div>;
   if (commits.length === 0) return <div style={{ padding: 16, color: '#484f58', fontSize: 12 }}>No commits</div>;
 
   // Group by date
@@ -418,19 +422,19 @@ function FullLog({ sessionId }: { sessionId: string }) {
       {[...grouped.entries()].map(([date, cs]) => (
         <div key={date}>
           <div style={{
-            padding: '6px 16px', fontSize: 11, fontWeight: 600, color: '#6e7681',
-            background: '#161b22', borderBottom: '1px solid #30363d',
+            padding: '6px 16px', fontSize: 11, fontWeight: 600, color: '#525252',
+            background: '#111111', borderBottom: '1px solid #222222',
             position: 'sticky', top: 0, zIndex: 1,
           }}>
             {date}
           </div>
           {cs.map(c => (
-            <div key={c.hash} style={{ padding: '8px 16px', borderBottom: '1px solid #161b22', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <GitCommitHorizontal size={13} color="#58a6ff" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div key={c.hash} style={{ padding: '8px 16px', borderBottom: '1px solid #111111', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <GitCommitHorizontal size={13} color="#4ADE80" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: '#e6edf3', marginBottom: 2 }}>{c.subject}</div>
-                <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#6e7681' }}>
-                  <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', color: '#79c0ff' }}>{c.short}</span>
+                <div style={{ fontSize: 12, color: '#F4F4F5', marginBottom: 2 }}>{c.subject}</div>
+                <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#525252' }}>
+                  <span style={{ fontFamily: '"JetBrains Mono",monospace', color: '#93C5FD' }}>{c.short}</span>
                   <span>{c.author}</span>
                   <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{c.relDate}</span>
                 </div>
@@ -625,12 +629,12 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
   const totalDel = files?.reduce((s, f) => s + f.deletions, 0) ?? 0;
 
   return (
-    <div ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0d1117', outline: 'none' }}>
+    <div ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0c0c0c', outline: 'none' }}>
 
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid #30363d', background: '#161b22', flexShrink: 0, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid #222222', background: '#111111', flexShrink: 0, flexWrap: 'wrap' }}>
         {/* Mode tabs */}
-        <div style={{ display: 'flex', border: '1px solid #30363d', borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', border: '1px solid #222222', borderRadius: 6, overflow: 'hidden' }}>
           {MODES.map(({ id, icon, label }) => (
             <button
               key={id}
@@ -639,8 +643,8 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
                 display: 'flex', alignItems: 'center', gap: 4,
                 fontSize: 11, padding: '3px 9px',
                 background: mode === id ? '#1f6feb' : 'none',
-                color: mode === id ? '#fff' : '#8b949e',
-                border: 'none', borderRight: id !== 'log' ? '1px solid #30363d' : 'none',
+                color: mode === id ? '#fff' : '#737373',
+                border: 'none', borderRight: id !== 'log' ? '1px solid #222222' : 'none',
                 cursor: 'pointer',
               }}
             >
@@ -661,13 +665,15 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
                 if (e.key === 'Enter') { setEditingBase(false); setBase(draftBase); }
                 if (e.key === 'Escape') { setEditingBase(false); setDraftBase(base); }
               }}
-              style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, border: '1px solid #58a6ff', background: '#0d1117', color: '#c9d1d9', outline: 'none', width: 80, fontFamily: 'inherit' }}
+              style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, border: '1px solid #4ADE80', background: '#0c0c0c', color: '#d4d4d8', outline: 'none', width: 80, fontFamily: 'inherit' }}
             />
           ) : (
             <button
               onClick={() => { setDraftBase(base); setEditingBase(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #30363d', background: 'none', color: '#8b949e', cursor: 'pointer' }}
+              title="Base branch for comparison (click to change)"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #222222', background: 'none', color: '#737373', cursor: 'pointer' }}
             >
+              <span style={{ fontSize: 9, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>vs</span>
               <GitBranch size={10} />{base}
             </button>
           )
@@ -677,14 +683,14 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
 
         {/* Stats summary */}
         {files !== null && !loading && mode !== 'commits' && (
-          <span style={{ fontSize: 11, color: '#6e7681' }}>
+          <span style={{ fontSize: 11, color: '#525252' }}>
             {files.length} file{files.length !== 1 ? 's' : ''}
-            {totalAdd > 0 && <span style={{ color: '#3fb950', marginLeft: 6 }}>+{totalAdd}</span>}
-            {totalDel > 0 && <span style={{ color: '#ff7b72', marginLeft: 4 }}>-{totalDel}</span>}
+            {totalAdd > 0 && <span style={{ color: '#4ADE80', marginLeft: 6 }}>+{totalAdd}</span>}
+            {totalDel > 0 && <span style={{ color: '#F87171', marginLeft: 4 }}>-{totalDel}</span>}
           </span>
         )}
 
-        {loading && <RefreshCw size={11} color="#6e7681" className="animate-spin" />}
+        {loading && <RefreshCw size={11} color="#525252" className="animate-spin" />}
       </div>
 
       {/* Body */}
@@ -700,7 +706,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
 
         {/* File sidebar (all modes, when there are files) */}
         {showSidebar && (
-          <div className="hidden md:flex flex-col" style={{ width: 240, flexShrink: 0, borderRight: '1px solid #30363d' }}>
+          <div className="hidden md:flex flex-col" style={{ width: 240, flexShrink: 0, borderRight: '1px solid #222222' }}>
             <FileSidebar
               files={files}
               focusedIndex={focusedFileIdx}
@@ -718,10 +724,10 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
               Select a commit
             </div>
           )}
-          {loading && <div style={{ color: '#6e7681', fontSize: 13 }}>Loading…</div>}
-          {error   && <div style={{ color: '#ff7b72', fontSize: 13 }}>Error: {error}</div>}
+          {loading && <div style={{ color: '#525252', fontSize: 13 }}>Loading…</div>}
+          {error   && <div style={{ color: '#F87171', fontSize: 13 }}>Error: {error}</div>}
           {!loading && files !== null && files.length === 0 && (
-            <div style={{ color: '#3fb950', fontSize: 13 }}>✓  No changes</div>
+            <div style={{ color: '#4ADE80', fontSize: 13 }}>✓  No changes</div>
           )}
           {!loading && files?.map((file, i) => <FileBlock key={i} file={file} gitRoot={gitRoot} isFocused={i === focusedFileIdx} />)}
         </div>

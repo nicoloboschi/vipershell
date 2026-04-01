@@ -43,10 +43,24 @@ export interface Session {
   last_activity: number;
   busy: boolean;
   isClaudeCode?: boolean;
+  isCodex?: boolean;
+  isHermes?: boolean;
   /** Aggregate CPU % of all child processes */
   cpuPercent?: number;
   /** Aggregate RSS memory in MB of all child processes */
   memMb?: number;
+  /** Git common dir — shared across worktrees of the same repo */
+  gitRoot?: string;
+  /** Current git branch */
+  gitBranch?: string;
+  /** Whether the working tree has uncommitted changes */
+  gitDirty?: boolean;
+  /** PR number if one exists for the current branch */
+  prNum?: number;
+  /** PR state: OPEN, MERGED, CLOSED */
+  prState?: string;
+  /** PR URL */
+  prUrl?: string;
 }
 
 interface ManagedSession {
@@ -86,6 +100,12 @@ export class TmuxBridge {
   private memory: MemoryStore | null = null;
   private inputBuffers = new Map<string, string>();
   private cachedSessions: Session[] = [];
+  /** Cached git info per directory path — refreshed every 10s */
+  private gitCache = new Map<string, { gitRoot: string | null; branch: string | null; dirty: boolean }>();
+  private gitCacheInterval: NodeJS.Timeout | null = null;
+  /** Cached PR info per directory path — refreshed every 30s */
+  private prCache = new Map<string, { prNum: number; prState: string; prUrl: string } | null>();
+  private prCacheInterval: NodeJS.Timeout | null = null;
 
   setMemory(memory: MemoryStore): void {
     this.memory = memory;
@@ -93,20 +113,37 @@ export class TmuxBridge {
 
   async start(): Promise<void> {
     mkdirSync(SCROLLBACK_DIR, { recursive: true });
+    // Set a generous default history-limit so existing/external sessions also benefit
+    try {
+      await execAsync('tmux set-option -g history-limit 50000 2>/dev/null');
+      // Hide tmux pane borders so they don't clash with vipershell's own UI
+      await execAsync('tmux set-option -g pane-border-style "fg=#0c0c0c" 2>/dev/null');
+      await execAsync('tmux set-option -g pane-active-border-style "fg=#0c0c0c" 2>/dev/null');
+    } catch { /* tmux not running yet */ }
     // Restore sessions saved from a previous run (e.g. before reboot)
     await this.restoreSessions();
-    // Initial discovery
+    // Initial discovery (without git info, to populate cachedSessions for git cache)
+    await this.discoverSessions();
+    // Refresh git cache, then re-publish sessions with git info
+    await this._refreshGitCache().catch(() => {});
     await this.discoverSessions();
     // Poll every 2s for new/closed sessions
     this.sessionListInterval = setInterval(() => this.discoverSessions().catch(() => {}), 2000);
     // Poll every 1s for previews (short enough to catch transient CPU spikes from e.g. Claude generating)
     this.previewInterval = setInterval(() => this.publishPreviews().catch(() => {}), 1000);
+    // Refresh git info every 10s — cached per directory, included in session list
+    this.gitCacheInterval = setInterval(() => this._refreshGitCache().catch(() => {}), 10_000);
+    // Refresh PR info every 30s (uses gh CLI, more expensive)
+    this._refreshPRCache().catch(() => {});
+    this.prCacheInterval = setInterval(() => this._refreshPRCache().catch(() => {}), 30_000);
     logger.info('TmuxBridge started');
   }
 
   stop(): void {
     if (this.sessionListInterval) clearInterval(this.sessionListInterval);
     if (this.previewInterval) clearInterval(this.previewInterval);
+    if (this.gitCacheInterval) clearInterval(this.gitCacheInterval);
+    if (this.prCacheInterval) clearInterval(this.prCacheInterval);
     for (const [, ms] of this.managed) {
       try { ms.pty.kill(); } catch { /* ignore */ }
     }
@@ -195,10 +232,10 @@ export class TmuxBridge {
           const isLinux = os.platform() === 'linux';
           const inspectCmd = allPids.map(pid => {
             if (isLinux) {
-              return `echo "PANE:${pid}"; ps -o pid=,comm=,pcpu=,rss= --ppid ${pid} 2>/dev/null || true; ` +
+              return `echo "PANE:${pid}"; ps -o pid=,pcpu=,rss=,args= --ppid ${pid} 2>/dev/null || true; ` +
                 `echo "GC:${pid}"; pgrep -P $(pgrep -P ${pid} 2>/dev/null | tr '\\n' ',' | sed 's/,$//') 2>/dev/null | wc -l || echo 0`;
             }
-            return `echo "PANE:${pid}"; pgrep -P ${pid} 2>/dev/null | xargs -I{} ps -p {} -o pid=,comm=,pcpu=,rss= 2>/dev/null || true; ` +
+            return `echo "PANE:${pid}"; pgrep -P ${pid} 2>/dev/null | xargs -I{} ps -p {} -o pid=,pcpu=,rss=,args= 2>/dev/null || true; ` +
               `echo "GC:${pid}"; for cpid in $(pgrep -P ${pid} 2>/dev/null); do pgrep -P $cpid 2>/dev/null; done | wc -l || echo 0`;
           }).join('; ');
           const { stdout: inspectOut } = await execAsync(inspectCmd, { timeout: 5000 });
@@ -248,14 +285,14 @@ export class TmuxBridge {
               continue;
             }
 
-            // Child process line: pid comm cpu rss
+            // Child process line: pid cpu rss args...
             const parts = trimmed.split(/\s+/);
             if (parts.length >= 4) {
               children.push({
                 pid: parseInt(parts[0]!, 10),
-                comm: parts[1] ?? '',
-                cpu: parseFloat(parts[2] ?? '0'),
-                rss: parseInt(parts[3] ?? '0', 10),
+                comm: parts.slice(3).join(' '),
+                cpu: parseFloat(parts[1] ?? '0'),
+                rss: parseInt(parts[2] ?? '0', 10),
               });
             }
           }
@@ -280,6 +317,8 @@ export class TmuxBridge {
         const recentOutput = (nowSec - pi.paneActivity) < 5;
         let busy = recentOutput;
         let isClaudeCode = false;
+        let isCodex = false;
+        let isHermes = false;
         let cpuPercent = 0;
         let memMb = 0;
 
@@ -287,6 +326,8 @@ export class TmuxBridge {
           for (const c of procs.children) {
             if (!busy && (c.cpu > 5 || c.hasGrandchildren)) busy = true;
             if (/\bclaude\b/i.test(c.comm)) isClaudeCode = true;
+            if (/\bcodex\b/i.test(c.comm)) isCodex = true;
+            if (/\bhermes\b/i.test(c.comm)) isHermes = true;
             cpuPercent += c.cpu;
             memMb += c.rss / 1024;
           }
@@ -298,16 +339,22 @@ export class TmuxBridge {
             ? pi.paneTitle.trim()
             : s.name;
 
+        const sessionPath = pi.path || os.homedir();
+        const git = this.getGitInfo(sessionPath);
+
         return {
           id: s.id,
           name: displayName,
-          path: pi.path || os.homedir(),
+          path: sessionPath,
           username,
           last_activity: parseInt(s.activityStr, 10),
           busy,
           isClaudeCode,
+          isCodex,
+          isHermes,
           cpuPercent: Math.round(cpuPercent * 10) / 10,
           memMb: Math.round(memMb),
+          ...git,
         };
       });
 
@@ -327,7 +374,7 @@ export class TmuxBridge {
     // cannot create scrollback — it's kept only for the HistoryDialog REST endpoint.
     try {
       const { stdout } = await execAsync(
-        `tmux capture-pane -ep -S -2000 -t ${sh(sessionId)} 2>/dev/null`
+        `tmux capture-pane -ep -S -5000 -t ${sh(sessionId)} 2>/dev/null`
       );
       const lines = stdout.split('\n');
       let last = lines.length - 1;
@@ -440,7 +487,7 @@ export class TmuxBridge {
 
     const sessionPath = path ?? os.homedir();
     const dirArg = `-c ${JSON.stringify(sessionPath)}`;
-    await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg} && tmux set-option -t ${JSON.stringify(name)} status off`);
+    await execAsync(`tmux new-session -d -s ${JSON.stringify(name)} ${dirArg} && tmux set-option -t ${JSON.stringify(name)} status off && tmux set-option -t ${JSON.stringify(name)} history-limit 50000`);
     const { stdout } = await execAsync(`tmux display-message -t ${JSON.stringify(name)} -p "#{session_id}" 2>/dev/null`);
     const sessionId = stdout.trim() || name;
     this._persistSession(sessionId, name, sessionPath);
@@ -612,6 +659,91 @@ export class TmuxBridge {
 
     // Rewrite the file with updated session IDs
     this._writeSavedSessions(newSaved);
+  }
+
+  // --- Git cache (refreshed every 10s, keyed by directory path) ---
+
+  private async _refreshGitCache(): Promise<void> {
+    const paths = new Set(this.cachedSessions.map(s => s.path).filter(Boolean));
+    const results = await Promise.all(
+      Array.from(paths).map(async (cwd) => {
+        try {
+          // Use --show-toplevel for the repo root (resolves worktrees to main repo)
+          // and --git-common-dir to group worktrees of the same repo together.
+          const [toplevel, commonDir, branch, status] = await Promise.all([
+            execAsync(`git -C ${sh(cwd)} rev-parse --show-toplevel 2>/dev/null`, { timeout: 3000 })
+              .then(r => r.stdout.trim()).catch(() => ''),
+            execAsync(`git -C ${sh(cwd)} rev-parse --git-common-dir 2>/dev/null`, { timeout: 3000 })
+              .then(r => r.stdout.trim()).catch(() => ''),
+            execAsync(`git -C ${sh(cwd)} rev-parse --abbrev-ref HEAD 2>/dev/null`, { timeout: 3000 })
+              .then(r => r.stdout.trim()).catch(() => ''),
+            execAsync(`git -C ${sh(cwd)} status --short 2>/dev/null`, { timeout: 3000 })
+              .then(r => r.stdout.trim()).catch(() => ''),
+          ]);
+          if (!toplevel) return { cwd, gitRoot: null, branch: null, dirty: false };
+          // For worktrees, --git-common-dir points to the main repo's .git,
+          // so resolve its parent as the canonical gitRoot for grouping.
+          let gitRoot = toplevel;
+          if (commonDir && commonDir !== '.git') {
+            const absCommon = commonDir.startsWith('/') ? commonDir : join(cwd, commonDir);
+            // e.g. /path/to/main-repo/.git → /path/to/main-repo
+            gitRoot = absCommon.replace(/\/\.git\/?$/, '');
+          }
+          return {
+            cwd,
+            gitRoot,
+            branch: branch === 'HEAD' ? null : branch || null,
+            dirty: status.length > 0,
+          };
+        } catch {
+          return { cwd, gitRoot: null, branch: null, dirty: false };
+        }
+      })
+    );
+    for (const r of results) {
+      this.gitCache.set(r.cwd, { gitRoot: r.gitRoot, branch: r.branch, dirty: r.dirty });
+    }
+  }
+
+  private async _refreshPRCache(): Promise<void> {
+    // Only check paths that have a branch (i.e. are git repos)
+    const entries = Array.from(this.gitCache.entries()).filter(([, v]) => v.branch);
+    const results = await Promise.all(
+      entries.map(async ([cwd]) => {
+        try {
+          const { stdout } = await execAsync(
+            `gh pr view --json url,number,state 2>/dev/null`,
+            { cwd, timeout: 5000 }
+          );
+          const pr = JSON.parse(stdout.trim());
+          if (pr.number && pr.state) {
+            return { cwd, pr: { prNum: pr.number as number, prState: pr.state as string, prUrl: (pr.url as string) || '' } };
+          }
+        } catch { /* no PR or gh not available */ }
+        return { cwd, pr: null };
+      })
+    );
+    for (const r of results) {
+      this.prCache.set(r.cwd, r.pr);
+    }
+  }
+
+  /** Get cached git info for a directory path */
+  getGitInfo(path: string): { gitRoot?: string; gitBranch?: string; gitDirty?: boolean; prNum?: number; prState?: string; prUrl?: string } {
+    const cached = this.gitCache.get(path);
+    if (!cached || !cached.gitRoot) return {};
+    const info: { gitRoot?: string; gitBranch?: string; gitDirty?: boolean; prNum?: number; prState?: string; prUrl?: string } = {
+      gitRoot: cached.gitRoot,
+    };
+    if (cached.branch) info.gitBranch = cached.branch;
+    if (cached.dirty) info.gitDirty = true;
+    const pr = this.prCache.get(path);
+    if (pr) {
+      info.prNum = pr.prNum;
+      info.prState = pr.prState;
+      info.prUrl = pr.prUrl;
+    }
+    return info;
   }
 
   diagnostics() {

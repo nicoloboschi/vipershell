@@ -1,14 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import useStore, { activeTerminalSend, refreshAllTerminals } from './store';
 import { requestNotificationPermission } from './utils';
-import { applyTheme } from './themes';
 import { useWebSocket } from './hooks/useWebSocket';
 import Sidebar from './components/Sidebar';
 import PaneTerminal, { NOTES_SESSION_ID } from './components/PaneTerminal';
 import MobileKeybar from './components/MobileKeybar';
 import ConfirmDialog from './components/ConfirmDialog';
 import LogsModal from './components/LogsModal';
-import ThemeDialog from './components/ThemeDialog';
 import MemoryDialog from './components/MemoryDialog';
 import CommandsDialog, { loadCommands } from './components/CommandsDialog';
 import SessionList from './components/SessionList';
@@ -18,10 +16,11 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import {
-  Settings, ScrollText, Palette, ChevronDown, SquarePlus,
+  Settings, ScrollText, ChevronDown, SquarePlus,
   Home, Zap, TerminalSquare, BrainCircuit, RefreshCw, ImagePlus,
 } from 'lucide-react';
 import DirectoryPicker from './components/DirectoryPicker';
+import ViperIcon from './components/ViperIcon';
 import { tildefy } from './utils';
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -89,7 +88,6 @@ export default function App() {
   const { sendRef } = useWebSocket({ onMessage: handleMessage, onOpen: handleOpen });
   const send = useCallback((msg: Record<string, unknown>) => sendRef.current(msg), [sendRef]);
 
-  useEffect(() => { applyTheme(useStore.getState().theme); }, []); // eslint-disable-line
   useEffect(() => {
     document.addEventListener('click', requestNotificationPermission, { once: true });
     return () => document.removeEventListener('click', requestNotificationPermission);
@@ -145,8 +143,8 @@ export default function App() {
       className="flex overflow-hidden"
       style={{
         height: 'var(--vvh, 100dvh)', transition: 'height 0.25s ease',
-        background: '#0d1117', color: '#c9d1d9',
-        fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13,
+        background: '#0c0c0c', color: '#d4d4d8',
+        fontFamily: "'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13,
       }}
     >
       <Sidebar onConnect={connectSession} send={send} />
@@ -201,7 +199,6 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
 
   const [showSessions, setShowSessions] = useState(false);
   const [showLogs,     setShowLogs]     = useState(false);
-  const [showThemes,   setShowThemes]   = useState(false);
   const [showMemory,   setShowMemory]   = useState(false);
   const [showCommands, setShowCommands] = useState(false);
   const [commands,     setCommands]     = useState(loadCommands);
@@ -385,17 +382,13 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" className="w-48">
               <DropdownMenuLabel className="flex justify-between items-center text-xs">
-                <span>vipershell {'\u{1F40D}'}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ViperIcon size={13} color="var(--primary)" /> vipershell</span>
                 <span className="font-mono text-primary">v{version ?? '\u2026'}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setShowLogs(true)}>
                 <ScrollText size={14} /> Server Logs
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowThemes(true)}>
-                <Palette size={14} /> Theme
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setShowMemory(true)}>
                 <BrainCircuit size={14} /> Memory
               </DropdownMenuItem>
@@ -446,7 +439,6 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
       )}
 
       {showLogs     && <LogsModal     onClose={() => setShowLogs(false)} />}
-      {showThemes   && <ThemeDialog   onClose={() => setShowThemes(false)} />}
       {showMemory   && <MemoryDialog  onClose={() => setShowMemory(false)} />}
       {showCommands && <CommandsDialog onClose={() => { setShowCommands(false); setCommands(loadCommands()); }} />}
     </>

@@ -62,10 +62,33 @@ function getIcon(name: string, isDir: boolean, open: boolean = false): LucideIco
   return EXT_ICONS[name.split('.').pop()?.toLowerCase() ?? ''] ?? File;
 }
 
+/** Color tint by file type category for visual differentiation */
+const EXT_ICON_COLORS: Record<string, string> = {
+  ts: '#3178c6', tsx: '#3178c6',                    // TypeScript blue
+  js: '#f0db4f', jsx: '#f0db4f',                    // JavaScript yellow
+  py: '#3572A5',                                     // Python blue
+  go: '#00ADD8', rs: '#dea584', java: '#b07219',     // Go/Rust/Java
+  json: '#FACC15', yaml: '#FACC15', yml: '#FACC15', toml: '#FACC15', // Config yellow
+  html: '#e34c26', css: '#563d7c', scss: '#c6538c',  // Web
+  sh: '#4ADE80', bash: '#4ADE80', zsh: '#4ADE80',    // Shell green
+  md: '#737373', txt: '#737373',                      // Text muted
+  svg: '#FF9A00',                                     // SVG orange
+};
+
+function getIconColor(name: string, isDir: boolean, gitColor: string | null): string {
+  if (gitColor) return gitColor;
+  if (isDir) return '#93C5FD';
+  return EXT_ICON_COLORS[ext(name)] ?? '#737373';
+}
+
+const GIT_TOOLTIPS: Record<string, string> = {
+  modified: 'Modified', untracked: 'Untracked', added: 'Added', deleted: 'Deleted', renamed: 'Renamed',
+};
+
 function fmtSize(b: number): string {
   if (b < 1024) return `${b} B`;
-  if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const ext     = (name: string): string => (name ?? '').split('.').pop()?.toLowerCase() ?? '';
@@ -117,10 +140,10 @@ const isText  = (name: string): boolean => !isImage(name) && !isPdf(name);
 // ── File list entry ───────────────────────────────────────────────────────────
 
 const GIT_COLORS: Record<string, string> = {
-  modified:  '#d29922',
-  untracked: '#3fb950',
-  added:     '#3fb950',
-  deleted:   '#ff7b72',
+  modified:  '#FACC15',
+  untracked: '#4ADE80',
+  added:     '#4ADE80',
+  deleted:   '#F87171',
   renamed:   '#d2a8ff',
 };
 
@@ -148,10 +171,10 @@ function EntryRow({ entry, index, selected, focused, onSelect, onNavigate, gitSt
     ? Object.keys(gitStatus).some(p => p.startsWith(entry.path + '/'))
     : false;
 
-  const dirChangeColor = dirHasChanges ? '#d29922' : null;
+  const dirChangeColor = dirHasChanges ? '#FACC15' : null;
   const gitColor = status ? GIT_COLORS[status] : dirChangeColor;
-  const fileColor = gitColor ?? (entry.isDir ? '#c9d1d9' : '#8b949e');
-  const iconColor = gitColor ?? (entry.isDir ? '#79c0ff' : '#8b949e');
+  const fileColor = gitColor ?? (entry.isDir ? '#d4d4d8' : '#a3a3a3');
+  const iconColor = getIconColor(entry.name, entry.isDir, gitColor ?? null);
   return (
     <div
       data-entry-idx={index}
@@ -160,23 +183,26 @@ function EntryRow({ entry, index, selected, focused, onSelect, onNavigate, gitSt
         display: 'flex', alignItems: 'center', gap: 7,
         padding: '4px 10px', cursor: 'pointer', userSelect: 'none',
         background: active ? '#1f3a56' : focused ? '#1a2332' : 'transparent',
-        borderLeft: focused ? '2px solid #58a6ff' : '2px solid transparent',
-        borderBottom: '1px solid #161b22',
+        borderLeft: focused ? '2px solid #4ADE80' : '2px solid transparent',
+        borderBottom: '1px solid #111111',
       }}
-      onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!active) e.currentTarget.style.background = '#161b22'; }}
+      onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!active) e.currentTarget.style.background = '#111111'; }}
       onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
       <Icon size={13} color={iconColor} style={{ flexShrink: 0 }} />
-      <span style={{ fontSize: 12, color: fileColor, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+      <span style={{ fontSize: 12, color: fileColor, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"JetBrains Mono",monospace' }}>
         {entry.name}{entry.isDir ? '/' : ''}
       </span>
       {status && (
-        <span style={{ fontSize: 9, color: gitColor ?? undefined, fontWeight: 700, flexShrink: 0, fontFamily: '"Cascadia Code","JetBrains Mono",monospace' }}>
+        <span
+          title={GIT_TOOLTIPS[status] ?? status}
+          style={{ fontSize: 9, color: gitColor ?? undefined, fontWeight: 700, flexShrink: 0, fontFamily: '"JetBrains Mono",monospace' }}
+        >
           {GIT_LABELS[status]}
         </span>
       )}
       {dirHasChanges && (
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d29922', flexShrink: 0 }} />
+        <span title="Contains modified files" style={{ width: 6, height: 6, borderRadius: '50%', background: '#FACC15', flexShrink: 0 }} />
       )}
       {!entry.isDir && entry.size > 0 && !status && (
         <span style={{ fontSize: 10, color: '#484f58', flexShrink: 0 }}>{fmtSize(entry.size)}</span>
@@ -189,12 +215,13 @@ function EntryRow({ entry, index, selected, focused, onSelect, onNavigate, gitSt
 
 interface FileViewerProps {
   path: string | null;
+  cwd?: string | null;
   highlightQuery?: string | null;
   highlightLine?: number | null;
   onDelete?: () => void;
 }
 
-function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewerProps) {
+function FileViewer({ path, cwd: viewerCwd, highlightQuery, highlightLine, onDelete }: FileViewerProps) {
   const [original,  setOriginal]  = useState('');
   const [content,   setContent]   = useState('');
   const [mode,      setMode]      = useState<'preview' | 'edit'>('preview');
@@ -294,14 +321,14 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* File toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderBottom: '1px solid #30363d', background: '#161b22', flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: '#8b949e', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={path}>
-          {path}{isDirty ? ' \u2022' : ''}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderBottom: '1px solid #222222', background: '#111111', flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: '#737373', fontFamily: '"JetBrains Mono",monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={path}>
+          {(viewerCwd && path?.startsWith(viewerCwd + '/') ? path.slice(viewerCwd.length + 1) : path)}{isDirty ? ' \u2022' : ''}
         </span>
         <button
           onClick={copyPath}
           title="Copy path"
-          style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copied ? '#3fb950' : '#6e7681', padding: 2, flexShrink: 0 }}
+          style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copied ? '#4ADE80' : '#525252', padding: 2, flexShrink: 0 }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
@@ -310,7 +337,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
           <button
             onClick={copyContent}
             title="Copy file content"
-            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copiedContent ? '#3fb950' : '#6e7681', padding: 2, flexShrink: 0 }}
+            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: copiedContent ? '#4ADE80' : '#525252', padding: 2, flexShrink: 0 }}
           >
             {copiedContent ? <Check size={12} /> : <ClipboardCopy size={12} />}
           </button>
@@ -319,20 +346,20 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
         <button
           onClick={deleteFile}
           title="Delete file"
-          style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', padding: 2, flexShrink: 0, marginLeft: 2 }}
-          onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#ff7b72'; }}
-          onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#6e7681'; }}
+          style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#525252', padding: 2, flexShrink: 0, marginLeft: 2 }}
+          onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#F87171'; }}
+          onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { (e.currentTarget as HTMLButtonElement).style.color = '#525252'; }}
         >
           <Trash2 size={12} />
         </button>
 
         {saveMsg && (
-          <span style={{ fontSize: 11, color: saveMsg.startsWith('Error') ? '#ff7b72' : '#3fb950' }}>{saveMsg}</span>
+          <span style={{ fontSize: 11, color: saveMsg.startsWith('Error') ? '#F87171' : '#4ADE80' }}>{saveMsg}</span>
         )}
 
         {/* Preview / Edit toggle — only for text files */}
         {textFile && (
-          <div style={{ display: 'flex', border: '1px solid #30363d', borderRadius: 5, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', border: '1px solid #222222', borderRadius: 5, overflow: 'hidden' }}>
             {([
               { id: 'preview' as const, icon: <Eye size={11} />,    label: mdFile ? 'Preview' : 'View' },
               { id: 'edit' as const,    icon: <Pencil size={11} />, label: 'Edit' },
@@ -345,7 +372,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
                   fontSize: 11, padding: '2px 8px',
                   background: mode === id ? 'var(--accent)' : 'none',
                   color: mode === id ? 'var(--foreground)' : 'var(--muted-foreground)',
-                  border: 'none', borderRight: id === 'preview' ? '1px solid #30363d' : 'none',
+                  border: 'none', borderRight: id === 'preview' ? '1px solid #222222' : 'none',
                   cursor: 'pointer',
                 }}
               >
@@ -365,7 +392,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
               display: 'flex', alignItems: 'center', gap: 4,
               fontSize: 11, padding: '3px 8px', borderRadius: 5,
               background: isDirty ? '#1f6feb' : 'none',
-              border: isDirty ? 'none' : '1px solid #30363d',
+              border: isDirty ? 'none' : '1px solid #222222',
               color: isDirty ? '#fff' : '#484f58',
               cursor: isDirty && !saving ? 'pointer' : 'default',
             }}
@@ -376,14 +403,14 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
       </div>
 
       {/* Content area */}
-      {loading && <div style={{ padding: 16, color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
-      {error   && <div style={{ padding: 16, color: '#ff7b72', fontSize: 12 }}>{error}</div>}
+      {loading && <div style={{ padding: 16, color: '#525252', fontSize: 12 }}>Loading\u2026</div>}
+      {error   && <div style={{ padding: 16, color: '#F87171', fontSize: 12 }}>{error}</div>}
 
       {!loading && !error && (
         <>
           {imgFile && (
             <div style={{ padding: 16, overflow: 'auto', flex: 1 }}>
-              <img src={`/api/fs/raw?path=${encodeURIComponent(path)}`} alt={fileName} style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid #30363d' }} />
+              <img src={`/api/fs/raw?path=${encodeURIComponent(path)}`} alt={fileName} style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid #222222' }} />
             </div>
           )}
 
@@ -400,7 +427,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
                 onChange={setContent}
                 onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 's' && e.metaKey) { e.preventDefault(); if (isDirty) save(); } }}
                 basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, tabSize: 2, searchKeymap: false }}
-                style={{ fontSize: 13, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace', minHeight: '100%' }}
+                style={{ fontSize: 13, fontFamily: '"JetBrains Mono",monospace', minHeight: '100%' }}
               />
             </div>
           )}
@@ -413,7 +440,7 @@ function FileViewer({ path, highlightQuery, highlightLine, onDelete }: FileViewe
                 showLineNumbers
                 wrapLongLines
                 lineNumberStyle={{ minWidth: '3em', paddingRight: 12, color: '#484f58', userSelect: 'none' }}
-                customStyle={{ margin: 0, padding: '8px 0', background: '#0d1117', fontSize: 12, fontFamily: '"Cascadia Code","JetBrains Mono","Fira Code",monospace' }}
+                customStyle={{ margin: 0, padding: '8px 0', background: '#0c0c0c', fontSize: 12, fontFamily: '"JetBrains Mono",monospace' }}
                 lineProps={(lineNum) => {
                   const isTarget = highlightLine != null && lineNum === highlightLine;
                   return {
@@ -461,7 +488,7 @@ function SearchResult({ result, isActive, onClick, query }: SearchResultProps) {
     let key = 0;
     while ((idx = remaining.toLowerCase().indexOf(lowerQuery)) !== -1) {
       if (idx > 0) parts.push(<span key={key++}>{remaining.slice(0, idx)}</span>);
-      parts.push(<span key={key++} style={{ background: '#d2992240', color: '#e3b341', borderRadius: 2, padding: '0 1px' }}>{remaining.slice(idx, idx + query.length)}</span>);
+      parts.push(<span key={key++} style={{ background: '#FACC1540', color: '#e3b341', borderRadius: 2, padding: '0 1px' }}>{remaining.slice(idx, idx + query.length)}</span>);
       remaining = remaining.slice(idx + query.length);
     }
     if (remaining) parts.push(<span key={key++}>{remaining}</span>);
@@ -472,23 +499,19 @@ function SearchResult({ result, isActive, onClick, query }: SearchResultProps) {
     <div
       onClick={onClick}
       style={{
-        padding: '3px 10px',
+        padding: '3px 10px 3px 20px',
         cursor: 'pointer',
         background: isActive ? '#1f3a56' : 'transparent',
-        borderBottom: '1px solid #161b22',
+        borderBottom: '1px solid #111111',
+        display: 'flex', alignItems: 'baseline', gap: 8,
       }}
-      onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!isActive) e.currentTarget.style.background = '#161b22'; }}
+      onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!isActive) e.currentTarget.style.background = '#111111'; }}
       onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <span style={{ fontSize: 11, color: '#79c0ff', fontFamily: '"Cascadia Code","JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {result.file}
-        </span>
-        <span style={{ fontSize: 10, color: '#484f58', flexShrink: 0 }}>:{result.line}</span>
-      </div>
+      <span style={{ fontSize: 10, color: '#484f58', flexShrink: 0, fontFamily: '"JetBrains Mono",monospace', minWidth: 28, textAlign: 'right' }}>{result.line}</span>
       <div style={{
-        fontSize: 11, color: '#8b949e', fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1,
+        fontSize: 11, color: '#a3a3a3', fontFamily: '"JetBrains Mono",monospace',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
       }}>
         {highlightSearchText(result.text.trim())}
       </div>
@@ -579,9 +602,9 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Search input */}
-      <div style={{ padding: '8px 10px 4px', borderBottom: '1px solid #30363d', background: '#161b22', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#0d1117', border: '1px solid #30363d', borderRadius: 5, padding: '4px 8px' }}>
-          <Search size={12} style={{ color: '#6e7681', flexShrink: 0 }} />
+      <div style={{ padding: '8px 10px 4px', borderBottom: '1px solid #222222', background: '#111111', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#0c0c0c', border: '1px solid #222222', borderRadius: 5, padding: '4px 8px' }}>
+          <Search size={12} style={{ color: '#525252', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
@@ -596,36 +619,36 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
                 onOpenFile(cwd ? `${cwd}/${r.file}` : r.file, query, r.line);
               }
             }}
-            placeholder="Search in files\u2026"
+            placeholder="Search in files…"
             spellCheck={false}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
-              color: '#c9d1d9', fontSize: 12, fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+              color: '#d4d4d8', fontSize: 12, fontFamily: '"JetBrains Mono",monospace',
               padding: 0,
             }}
           />
           {query && (
             <button
               onClick={() => { setQuery(''); setResults([]); setSearched(false); inputRef.current?.focus(); }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', display: 'flex', padding: 0, flexShrink: 0 }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#525252', display: 'flex', padding: 0, flexShrink: 0 }}
             >
               <X size={12} />
             </button>
           )}
           <button
             onClick={() => setShowGlob(g => !g)}
-            title="File filter (glob)"
+            title={glob ? `File filter active: ${glob}` : 'Filter by file type (e.g. *.ts, *.jsx)'}
             style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, display: 'flex',
-              color: showGlob || glob ? '#58a6ff' : '#6e7681',
+              color: showGlob || glob ? '#4ADE80' : '#525252',
             }}
           >
             <Filter size={12} />
           </button>
         </div>
         {showGlob && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, background: '#0d1117', border: '1px solid #30363d', borderRadius: 5, padding: '3px 8px' }}>
-            <span style={{ fontSize: 10, color: '#6e7681', flexShrink: 0 }}>glob:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, background: '#0c0c0c', border: '1px solid #222222', borderRadius: 5, padding: '3px 8px' }}>
+            <span style={{ fontSize: 10, color: '#525252', flexShrink: 0 }}>glob:</span>
             <input
               value={glob}
               onChange={e => handleGlobChange(e.target.value)}
@@ -633,14 +656,14 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
               spellCheck={false}
               style={{
                 flex: 1, border: 'none', outline: 'none', background: 'transparent',
-                color: '#c9d1d9', fontSize: 11, fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                color: '#d4d4d8', fontSize: 11, fontFamily: '"JetBrains Mono",monospace',
                 padding: 0,
               }}
             />
           </div>
         )}
         {searched && (
-          <div style={{ fontSize: 10, color: '#6e7681', padding: '4px 0 2px', display: 'flex', gap: 6 }}>
+          <div style={{ fontSize: 10, color: '#525252', padding: '4px 0 2px', display: 'flex', gap: 6 }}>
             {searching ? (
               <span>Searching\u2026</span>
             ) : (
@@ -672,8 +695,8 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
         {fileResults.length > 0 && (
           <div>
             <div style={{
-              padding: '4px 10px', fontSize: 10, color: '#6e7681',
-              background: '#161b22', borderBottom: '1px solid #21262d',
+              padding: '4px 10px', fontSize: 10, color: '#525252',
+              background: '#111111', borderBottom: '1px solid #21262d',
               textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
               position: 'sticky', top: 0, zIndex: 2,
             }}>
@@ -687,15 +710,15 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
                   padding: '4px 10px',
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6,
-                  borderBottom: '1px solid #161b22',
+                  borderBottom: '1px solid #111111',
                 }}
-                onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#161b22'}
+                onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#111111'}
                 onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = 'transparent'}
               >
-                <File size={11} style={{ color: '#8b949e', flexShrink: 0 }} />
+                <File size={11} style={{ color: '#737373', flexShrink: 0 }} />
                 <span style={{
-                  fontSize: 11, color: '#79c0ff',
-                  fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                  fontSize: 11, color: '#93C5FD',
+                  fontFamily: '"JetBrains Mono",monospace',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {file}
@@ -707,8 +730,8 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
         {/* Content matches */}
         {results.length > 0 && fileResults.length > 0 && (
           <div style={{
-            padding: '4px 10px', fontSize: 10, color: '#6e7681',
-            background: '#161b22', borderBottom: '1px solid #21262d',
+            padding: '4px 10px', fontSize: 10, color: '#525252',
+            background: '#111111', borderBottom: '1px solid #21262d',
             textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
             position: 'sticky', top: 0, zIndex: 2,
           }}>
@@ -717,18 +740,18 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
         )}
         {(() => {
           let globalIdx = 0;
-          return Object.entries(grouped).map(([file, matches]) => (
-          <div key={file}>
+          return Object.entries(grouped).map(([file, matches], groupIdx) => (
+          <div key={file} style={{ marginTop: groupIdx > 0 ? 6 : 0 }}>
             <div style={{
-              padding: '4px 10px', fontSize: 11, color: '#c9d1d9',
-              fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
-              background: '#161b22', borderBottom: '1px solid #21262d',
+              padding: '5px 10px', fontSize: 11, color: '#d4d4d8',
+              fontFamily: '"JetBrains Mono",monospace',
+              background: '#111111', borderBottom: '1px solid #21262d',
               display: 'flex', alignItems: 'center', gap: 6,
               position: 'sticky', top: fileResults.length > 0 ? 22 : 0, zIndex: 1,
             }}>
-              <FileCode size={11} style={{ color: '#8b949e', flexShrink: 0 }} />
+              <FileCode size={11} style={{ color: '#737373', flexShrink: 0 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file}</span>
-              <span style={{ color: '#484f58', flexShrink: 0 }}>{matches.length}</span>
+              <span style={{ color: '#484f58', flexShrink: 0, fontSize: 10 }}>{matches.length}</span>
             </div>
             {matches.map((r, i) => {
               const idx = globalIdx++;
@@ -768,7 +791,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [loading,      setLoading]      = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    try { return parseInt(localStorage.getItem('vipershell:files-sidebar-w') ?? '') || 220; } catch { return 220; }
+    try { return parseInt(localStorage.getItem('vipershell:files-sidebar-w') ?? '') || 280; } catch { return 280; }
   });
   // Mobile: 'list' | 'preview'
   const [mobileView,   setMobileView]   = useState<'list' | 'preview'>('list');
@@ -1023,18 +1046,18 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     : null;
 
   const toolbar = (showBack: boolean = false) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid #30363d', background: '#161b22', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid #222222', background: '#111111', flexShrink: 0 }}>
       {showBack ? (
-        <button onClick={() => setMobileView('list')} title="Back to files" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', padding: 2, flexShrink: 0 }}>
+        <button onClick={() => setMobileView('list')} title="Back to files" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#525252', padding: 2, flexShrink: 0 }}>
           <ChevronLeft size={14} />
         </button>
       ) : upDir ? (
-        <button onClick={() => browse(upDir)} title="Go up" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', padding: 2, flexShrink: 0 }}>
+        <button onClick={() => browse(upDir)} title="Go up" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#525252', padding: 2, flexShrink: 0 }}>
           <ChevronLeft size={14} />
         </button>
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
-        <span style={{ fontFamily: '"Cascadia Code","JetBrains Mono",monospace', fontSize: 11, color: '#6e7681', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 11, color: '#525252', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {showBack
             ? (selectedFile?.split('/').pop() ?? '')
             : `${cwd?.split('/').pop() ?? '~'}${breadcrumbs.length > 0 ? '/' + breadcrumbs.join('/') : ''}`}
@@ -1050,17 +1073,17 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           <button
             onClick={() => { setShowFileFilter(f => { if (!f) setTimeout(() => fileFilterRef.current?.focus(), 0); return !f; }); setFileFilter(''); }}
             title="Filter files"
-            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: showFileFilter ? '#58a6ff' : '#6e7681', flexShrink: 0, padding: 3 }}
+            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: showFileFilter ? '#4ADE80' : '#525252', flexShrink: 0, padding: 3 }}
           >
             <Search size={12} />
           </button>
-          <button onClick={() => startCreate('file')} title="New file" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', flexShrink: 0, padding: 3 }}>
+          <button onClick={() => startCreate('file')} title="New file" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#525252', flexShrink: 0, padding: 3 }}>
             <FilePlus size={15} />
           </button>
-          <button onClick={() => startCreate('folder')} title="New folder" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', flexShrink: 0, padding: 3 }}>
+          <button onClick={() => startCreate('folder')} title="New folder" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#525252', flexShrink: 0, padding: 3 }}>
             <FolderPlus size={15} />
           </button>
-          <button onClick={() => browse(dir)} disabled={loading} title="Refresh" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: loading ? '#484f58' : '#6e7681', flexShrink: 0 }}>
+          <button onClick={() => browse(dir)} disabled={loading} title="Refresh" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: loading ? '#484f58' : '#525252', flexShrink: 0 }}>
             <RefreshCw size={11} />
           </button>
         </>
@@ -1071,9 +1094,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const fileFilterInput = showFileFilter && (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
-      background: '#0d1117', borderBottom: '1px solid #21262d',
+      background: '#0c0c0c', borderBottom: '1px solid #21262d',
     }}>
-      <Search size={11} style={{ color: '#6e7681', flexShrink: 0 }} />
+      <Search size={11} style={{ color: '#525252', flexShrink: 0 }} />
       <input
         ref={fileFilterRef}
         value={fileFilter}
@@ -1081,22 +1104,22 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         onKeyDown={e => {
           if (e.key === 'Escape') { setShowFileFilter(false); setFileFilter(''); }
         }}
-        placeholder="Filter files\u2026"
+        placeholder="Filter files…"
         spellCheck={false}
         style={{
           flex: 1, border: 'none', outline: 'none', background: 'transparent',
-          color: '#c9d1d9', fontSize: 11, padding: 0,
-          fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+          color: '#d4d4d8', fontSize: 11, padding: 0,
+          fontFamily: '"JetBrains Mono",monospace',
         }}
       />
       {fileFilter && (
-        <span style={{ fontSize: 10, color: '#6e7681', flexShrink: 0 }}>
+        <span style={{ fontSize: 10, color: '#525252', flexShrink: 0 }}>
           {filteredEntries.length}/{entries.length}
         </span>
       )}
       <button
         onClick={() => { setShowFileFilter(false); setFileFilter(''); }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6e7681', display: 'flex', padding: 0, flexShrink: 0 }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#525252', display: 'flex', padding: 0, flexShrink: 0 }}
       >
         <X size={11} />
       </button>
@@ -1106,11 +1129,11 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const createInput = creating && (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 7, padding: '4px 10px',
-      background: '#1c2128', borderBottom: '1px solid #161b22',
+      background: '#1a1a1a', borderBottom: '1px solid #111111',
     }}>
       {creating === 'folder'
-        ? <FolderPlus size={13} color="#79c0ff" style={{ flexShrink: 0 }} />
-        : <FilePlus size={13} color="#8b949e" style={{ flexShrink: 0 }} />}
+        ? <FolderPlus size={13} color="#93C5FD" style={{ flexShrink: 0 }} />
+        : <FilePlus size={13} color="#737373" style={{ flexShrink: 0 }} />}
       <input
         ref={createInputRef}
         value={createName}
@@ -1124,8 +1147,8 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
         spellCheck={false}
         style={{
           flex: 1, border: 'none', outline: 'none', background: 'transparent',
-          color: '#c9d1d9', fontSize: 12, padding: 0,
-          fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+          color: '#d4d4d8', fontSize: 12, padding: 0,
+          fontFamily: '"JetBrains Mono",monospace',
         }}
       />
     </div>
@@ -1137,7 +1160,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {fileFilterInput}
         {createInput}
-        {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
+        {loading && <div style={{ padding: '8px 12px', color: '#525252', fontSize: 12 }}>Loading\u2026</div>}
         {!loading && filteredEntries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>{fileFilter ? 'No matches' : 'Empty directory'}</div>}
         {filteredEntries.map(e => (
           <EntryRow key={e.path} entry={e} selected={selectedFile} onSelect={selectFile} onNavigate={browse} gitStatus={gitStatus} />
@@ -1149,13 +1172,13 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const preview = (
     <>
       {toolbar(true)}
-      <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
+      <FileViewer path={selectedFile} cwd={cwd} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
     </>
   );
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0d1117', position: 'relative' }}
+      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0c0c0c', position: 'relative' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1169,7 +1192,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none',
         }}>
-          <div style={{ textAlign: 'center', color: '#58a6ff' }}>
+          <div style={{ textAlign: 'center', color: '#4ADE80' }}>
             <Upload size={28} style={{ marginBottom: 6 }} />
             <div style={{ fontSize: 13, fontWeight: 500 }}>
               Drop to upload to /{dir?.split('/').pop() ?? ''}
@@ -1180,9 +1203,9 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       {uploadMsg && (
         <div style={{
           position: 'absolute', bottom: 14, left: '50%', transform: 'translateX(-50%)',
-          background: '#161b22', border: '1px solid #30363d', borderRadius: 6,
+          background: '#111111', border: '1px solid #222222', borderRadius: 6,
           padding: '6px 14px', fontSize: 12, zIndex: 40, whiteSpace: 'nowrap', pointerEvents: 'none',
-          color: uploadMsg.includes('failed') ? '#ff7b72' : '#3fb950',
+          color: uploadMsg.includes('failed') ? '#F87171' : '#4ADE80',
         }}>
           {uploadMsg}
         </div>
@@ -1204,7 +1227,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           >
             {fileFilterInput}
             {createInput}
-            {loading && <div style={{ padding: '8px 12px', color: '#6e7681', fontSize: 12 }}>Loading\u2026</div>}
+            {loading && <div style={{ padding: '8px 12px', color: '#525252', fontSize: 12 }}>Loading\u2026</div>}
             {!loading && filteredEntries.length === 0 && !creating && <div style={{ padding: '16px 12px', color: '#484f58', fontSize: 12, textAlign: 'center' }}>{fileFilter ? 'No matches' : 'Empty directory'}</div>}
             {filteredEntries.map((e, i) => (
               <EntryRow key={e.path} entry={e} index={i} selected={selectedFile} focused={i === focusedEntry} onSelect={setSelectedFile} onNavigate={browse} gitStatus={gitStatus} />
@@ -1217,12 +1240,12 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
                 cursor: 'col-resize', zIndex: 10,
                 background: 'transparent',
               }}
-              onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#58a6ff'}
+              onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#4ADE80'}
               onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { if (!draggingRef.current) e.currentTarget.style.background = 'transparent'; }}
             />
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <FileViewer path={selectedFile} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
+            <FileViewer path={selectedFile} cwd={cwd} highlightQuery={highlightQuery} highlightLine={highlightLine} onDelete={handleDelete} />
           </div>
         </div>
       </div>

@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
+import ConfigDialog from './ConfigDialog';
 
 interface LogEntry {
   ts: string;
@@ -16,7 +11,7 @@ interface LogsModalProps {
   onClose: () => void;
 }
 
-export default function LogsModal({ onClose }: LogsModalProps) {
+export function LogsContent() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -37,25 +32,24 @@ export default function LogsModal({ onClose }: LogsModalProps) {
   }, [logs]);
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[90vw] max-w-[900px] max-h-[85vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-4 py-3.5 border-b" style={{ borderColor: 'var(--border)' }}>
-          <DialogTitle style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
-            Server Logs
-          </DialogTitle>
-        </DialogHeader>
-        <div className="p-4 flex-1 min-h-0">
-          <div className="settings-logs-body">
-            {logs.length === 0 && <span style={{ color: 'var(--muted-foreground)' }}>No logs yet\u2026</span>}
-            {logs.map((l, i) => (
-              <div key={i} className={`log-entry ${l.level}`}>
-                {l.ts} {l.level.padEnd(8)} {l.msg}
-              </div>
-            ))}
-            <div ref={logsEndRef} />
+    <div className="p-4 flex-1 min-h-0">
+      <div className="settings-logs-body">
+        {logs.length === 0 && <span style={{ color: 'var(--muted-foreground)' }}>No logs yet\u2026</span>}
+        {logs.map((l, i) => (
+          <div key={i} className={`log-entry ${l.level}`}>
+            {l.ts} {l.level.padEnd(8)} {l.msg}
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        ))}
+        <div ref={logsEndRef} />
+      </div>
+    </div>
+  );
+}
+
+export default function LogsModal({ onClose }: LogsModalProps) {
+  return (
+    <ConfigDialog open onClose={onClose}>
+      <LogsContent />
+    </ConfigDialog>
   );
 }

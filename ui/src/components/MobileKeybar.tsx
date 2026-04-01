@@ -29,7 +29,7 @@ const BTN_STYLE: React.CSSProperties = {
   background: 'var(--secondary)',
   color: 'var(--foreground)',
   fontSize: 11,
-  fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+  fontFamily: '"JetBrains Mono",monospace',
   cursor: 'pointer',
   userSelect: 'none',
   WebkitUserSelect: 'none',

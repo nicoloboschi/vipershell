@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import ConfigDialog from './ConfigDialog';
 
 interface PubsubChannel {
   channel: string;
@@ -62,7 +62,7 @@ interface DiagnosticsDialogProps {
   onClose: () => void;
 }
 
-export default function DiagnosticsDialog({ onClose }: DiagnosticsDialogProps) {
+export function DiagnosticsContent() {
   const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [browserMem, setBrowserMem] = useState<BrowserMemory | null>(null);
@@ -102,15 +102,7 @@ export default function DiagnosticsDialog({ onClose }: DiagnosticsDialogProps) {
   const heapHigh = heapUsedGb > 1;
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[90vw] max-w-[520px] max-h-[85vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <DialogTitle style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
-            Diagnostics
-          </DialogTitle>
-        </DialogHeader>
-
-        <div style={{ padding: 16, overflowY: 'auto', fontSize: 12 }}>
+    <div style={{ padding: 16, overflowY: 'auto', flex: 1, fontSize: 12 }}>
           {error && (
             <div style={{ color: 'var(--destructive)', marginBottom: 8 }}>
               Failed to fetch: {error}
@@ -219,8 +211,14 @@ export default function DiagnosticsDialog({ onClose }: DiagnosticsDialogProps) {
               )}
             </>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    </div>
+  );
+}
+
+export default function DiagnosticsDialog({ onClose }: DiagnosticsDialogProps) {
+  return (
+    <ConfigDialog open onClose={onClose}>
+      <DiagnosticsContent />
+    </ConfigDialog>
   );
 }

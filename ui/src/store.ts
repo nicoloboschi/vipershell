@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { notify } from './utils';
-import { applyTheme, DEFAULT_THEME } from './themes';
 
 export interface Session {
   id: string;
@@ -9,8 +8,16 @@ export interface Session {
   username?: string;
   last_activity?: number;
   isClaudeCode?: boolean;
+  isCodex?: boolean;
+  isHermes?: boolean;
   cpuPercent?: number;
   memMb?: number;
+  gitRoot?: string;
+  gitBranch?: string;
+  gitDirty?: boolean;
+  prNum?: number;
+  prState?: string;
+  prUrl?: string;
 }
 
 export interface ConfirmState {
@@ -39,9 +46,7 @@ export interface StoreState {
   wsStatus: WsStatus;
   sheetOpen: boolean;
   confirm: ConfirmState | null;
-  theme: string;
 
-  setTheme: (name: string) => void;
   setWsStatus: (status: WsStatus) => void;
   setSheetOpen: (open: boolean) => void;
   renderSessions: (sessions: Session[]) => void;
@@ -153,13 +158,6 @@ const useStore = create<StoreState>((set, get) => ({
   wsStatus: 'connecting',
   sheetOpen: false,
   confirm: null,
-  theme: localStorage.getItem('vipershell-theme') ?? DEFAULT_THEME,
-
-  setTheme(name: string) {
-    localStorage.setItem('vipershell-theme', name);
-    applyTheme(name);
-    set({ theme: name });
-  },
 
   setWsStatus(status: WsStatus) {
     set({ wsStatus: status });

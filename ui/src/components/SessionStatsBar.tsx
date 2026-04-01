@@ -3,6 +3,7 @@ import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, Spl
 import useStore, { refreshAllTerminals, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry } from '../store';
 import StatChips from './StatChips';
 import ClaudeIcon from './ClaudeIcon';
+import OpenAIIcon from './OpenAIIcon';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { NOTES_SESSION_ID } from './PaneTerminal';
 import type { Layout } from './TerminalGrid';
@@ -139,7 +140,7 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           }}
           title="Session info"
         >
-          {session?.isClaudeCode ? <ClaudeIcon size={14} /> : <SquareTerminal size={14} style={{ opacity: 0.5 }} />}
+          {session?.isClaudeCode ? <ClaudeIcon size={14} /> : session?.isCodex ? <OpenAIIcon size={14} /> : <SquareTerminal size={14} style={{ opacity: 0.5 }} />}
           <span style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {forceTextPresentation(session?.name ?? '')}
           </span>
@@ -193,7 +194,7 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
               </div>
               <div style={{
                 fontSize: 11, color: 'var(--foreground)',
-                fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                fontFamily: '"JetBrains Mono",monospace',
                 opacity: 0.8, wordBreak: 'break-all',
                 maxHeight: 80, overflow: 'auto',
               }}>
@@ -226,13 +227,13 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
         </div>
         {/* Row 2: layout switcher + tab bar */}
         <div
-          className="flex items-center gap-2 px-4 py-1"
-          style={{ borderTop: '1px solid var(--border)', opacity: 0.95 }}
+          className="flex items-center gap-2 px-4 py-1.5"
+          style={{ borderTop: '1px solid var(--border)' }}
         >
           {session?.path && (
             <span
               className="text-muted-foreground"
-              style={{ fontSize: 10, fontFamily: '"Cascadia Code","JetBrains Mono",monospace', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}
+              style={{ fontSize: 10, fontFamily: '"JetBrains Mono",monospace', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200, flexShrink: 0 }}
               title={session.path}
             >
               {session.path.replace(/^\/Users\/[^/]+/, '~')}
@@ -325,7 +326,7 @@ function CommandHistoryButton({ sessionId }: { sessionId: string }) {
                   className="hover:bg-white/5"
                 >
                   <span style={{
-                    fontFamily: '"Cascadia Code","JetBrains Mono",monospace',
+                    fontFamily: '"JetBrains Mono",monospace',
                     fontWeight: 500, flex: 1,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>

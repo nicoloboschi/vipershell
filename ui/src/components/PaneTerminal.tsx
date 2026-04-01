@@ -193,11 +193,9 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
       ))}
       {activeTab === 'diff'   && <GitDiffPane sessionId={sessionId} onOpenFile={(path: string) => { setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />}
       {activeTab === 'files'  && <FilesPane  sessionId={sessionId} openFileRef={openFileRef} onFileSelect={(path: string) => { saveLastFile(sessionId!, path); setHighlightQuery(null); setHighlightLine(null); }} highlightQuery={highlightQuery} highlightLine={highlightLine} />}
-      {activeTab === 'search' && (
-        <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, background: '#0d1117' }}>
-          <SearchPanel sessionId={sessionId} onOpenFile={(path: string, query?: string, line?: number) => { setHighlightQuery(query ?? null); setHighlightLine(line ?? null); setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />
-        </div>
-      )}
+      <div style={{ display: activeTab === 'search' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, background: '#0c0c0c' }}>
+        <SearchPanel sessionId={sessionId} onOpenFile={(path: string, query?: string, line?: number) => { setHighlightQuery(query ?? null); setHighlightLine(line ?? null); setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />
+      </div>
     </div>
   );
 }

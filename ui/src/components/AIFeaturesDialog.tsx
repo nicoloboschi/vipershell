@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Check, Loader, RotateCw, Tag, TerminalSquare } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Check, Loader, RotateCw, Tag, TerminalSquare } from 'lucide-react';
+import ConfigDialog from './ConfigDialog';
 import { Button } from './ui/button';
 
-type AIProvider = 'claude-code' | 'codex';
+type AIProvider = 'claude-code' | 'codex' | 'hermes';
 
 interface AIConfig {
   aiEnabled: boolean;
@@ -18,7 +18,7 @@ interface AIFeaturesDialogProps {
   onClose: () => void;
 }
 
-export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
+export function AIFeaturesContent() {
   const [cfg, setCfg] = useState<AIConfig | null>(null);
   const [saveState, setSaveState] = useState<AsyncState>('idle');
   const [saveError, setSaveError] = useState('');
@@ -50,16 +50,7 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[90vw] max-w-[480px] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-5 py-4 border-b border-border">
-          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
-            <Sparkles size={15} className="text-primary" />
-            AI Features
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="p-5 flex flex-col gap-4 min-h-[180px]">
+    <div className="p-5 flex flex-col gap-4 min-h-[180px] flex-1 overflow-y-auto">
           {!cfg ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader size={13} className="animate-spin" /> Loading&hellip;
@@ -89,6 +80,7 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
                     >
                       <option value="claude-code">Claude Code (claude CLI)</option>
                       <option value="codex">Codex (codex CLI)</option>
+                      <option value="hermes">Hermes Agent (hermes CLI)</option>
                     </select>
                     <p className="text-xs text-muted-foreground">
                       Uses the local <code className="bg-muted px-1 rounded">{cfg.aiProvider === 'claude-code' ? 'claude' : 'codex'}</code> CLI for one-shot prompts.
@@ -163,8 +155,14 @@ export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
               </Button>
             </>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    </div>
+  );
+}
+
+export default function AIFeaturesDialog({ onClose }: AIFeaturesDialogProps) {
+  return (
+    <ConfigDialog open onClose={onClose}>
+      <AIFeaturesContent />
+    </ConfigDialog>
   );
 }

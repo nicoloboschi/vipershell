@@ -164,7 +164,7 @@ export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick
             {sid === null ? (
               <div style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: '#0d1117', color: 'var(--muted-foreground)',
+                background: '#0c0c0c', color: 'var(--muted-foreground)',
               }}>
                 <Loader2 size={20} className="animate-spin" />
               </div>
