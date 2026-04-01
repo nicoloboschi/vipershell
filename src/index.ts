@@ -1,17 +1,26 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { TmuxBridge } from './bridge.js';
 import { MemoryStore } from './memory.js';
 import { AIService } from './ai.js';
 import { createApp, logger } from './server.js';
 import { config } from './config.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgVersion: string = (() => {
+  try { return JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')).version; }
+  catch { return 'unknown'; }
+})();
+
 const program = new Command();
 
 program
   .name('vipershell')
   .description('Your machine, anywhere — tmux sessions in your browser')
-  .version('0.0.1')
+  .version(pkgVersion)
   .option('--host <host>', 'Host to bind to', config.host)
   .option('--port <port>', 'Port to listen on', String(config.port))
   .option('--log-level <level>', 'Log level (debug|info|warning|error)', config.logLevel)
