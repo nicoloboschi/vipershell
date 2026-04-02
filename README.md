@@ -2,6 +2,8 @@
 
 Your machine, anywhere. Access and manage your tmux terminal sessions from any browser or phone.
 
+![vipershell screenshot](screenshot.png)
+
 ## Quick Start
 
 ### 1. Install tmux
