@@ -8,13 +8,15 @@
   },
   "files": [
     "dist",
-    "ui/dist"
+    "ui/dist",
+    "scripts/postinstall.sh"
   ],
   "scripts": {
     "build": "tsc && npm run build:ui",
     "build:ui": "cd ui && npm run build",
     "dev": "bash dev.sh",
     "start": "node dist/index.js",
+    "postinstall": "sh scripts/postinstall.sh",
     "prepack": "npm run build",
     "test": "vitest run"
   },
