@@ -1,12 +1,9 @@
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir, tmpdir } from 'os';
 import { logger } from './server.js';
 import type { DirectBridge } from './direct-bridge.js';
-
-const execAsync = promisify(exec);
 
 /** Run a CLI command with stdin input, return stdout. */
 function runWithStdin(cmd: string, args: string[], input: string, timeoutMs = 30_000, cwd?: string): Promise<string> {

@@ -257,7 +257,6 @@ export class DirectBridge {
   private lastPreviews = new Map<string, string>();
   private cachedSessions: Session[] = [];
   private knownSessions = new Set<string>();
-  private memory: MemoryStore | null = null;
   private daemon = new DaemonClient();
 
   private gitCache = new Map<string, { gitRoot: string | null; branch: string | null; dirty: boolean }>();
@@ -269,7 +268,9 @@ export class DirectBridge {
     mkdirSync(RING_DIR, { recursive: true });
   }
 
-  setMemory(memory: MemoryStore): void { this.memory = memory; }
+  // Reserved for future memory-aware features; kept on the API surface so
+  // index.ts can wire in a MemoryStore without needing a conditional.
+  setMemory(_memory: MemoryStore): void { /* noop for now */ }
 
   async start(): Promise<void> {
     this.daemon.setHandlers(

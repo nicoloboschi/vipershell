@@ -18,7 +18,7 @@
 import * as net from 'net';
 import * as pty from 'node-pty';
 import type { IPty } from 'node-pty';
-import { existsSync, unlinkSync, writeFileSync, readFileSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, unlinkSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
