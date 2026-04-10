@@ -51,9 +51,11 @@ export default function SettingsDialog({ onClose, initialTab }: SettingsDialogPr
                 className="flex items-center gap-2.5 px-4 py-2 text-left text-xs transition-colors"
                 style={{
                   color: active ? 'var(--foreground)' : 'var(--muted-foreground)',
-                  background: active ? 'var(--accent)' : 'transparent',
+                  background: active
+                    ? 'linear-gradient(135deg, #0074d9 0%, #009296 100%) right / 2px 100% no-repeat, var(--accent)'
+                    : 'transparent',
                   fontWeight: active ? 600 : 400,
-                  borderRight: active ? '2px solid var(--primary)' : '2px solid transparent',
+                  borderRight: '2px solid transparent',
                 }}
               >
                 <Icon size={14} />

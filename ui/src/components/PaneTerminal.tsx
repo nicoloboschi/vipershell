@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import useStore from '../store';
+import useStore, { refreshAllTerminals } from '../store';
 import SessionStatsBar from './SessionStatsBar';
 import GitDiffPane from './GitDiffPane';
 import FilesPane, { SearchPanel } from './FilesPane';
@@ -17,25 +17,37 @@ interface PaneTerminalProps {
   sessionId: string | null;
   send: (msg: Record<string, unknown>) => void;
   onTabReady?: (fn: (dir: 'left' | 'right') => void) => void;
-  onConnect?: (id: string) => void;
 }
 
-export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }: PaneTerminalProps): JSX.Element {
+export default function PaneTerminal({ sessionId, send, onTabReady }: PaneTerminalProps): JSX.Element {
   const openFileRef      = useRef<((path: string) => void) | null>(null);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
   const [highlightLine,  setHighlightLine]  = useState<number | null>(null);
   const [gridLayout, setGridLayout] = useState<Layout>('single');
   const changeLayoutRef = useRef<((l: Layout) => void) | null>(null);
 
-  // Keep visited sessions mounted (hidden) for instant switching
-  const allSessionIds = useStore(useShallow(s => s.sessions.map(ss => ss.id)));
+  // Git / Files / Search tabs track the currently-active pane within the
+  // workspace — when you click a different pane, the tabs re-scope to that
+  // pane's cwd automatically. `sessionId` here is the active workspace id.
+  const activePaneSessionId = useStore(s => {
+    if (!sessionId || sessionId === NOTES_SESSION_ID) return sessionId;
+    const ws = s.workspaces[sessionId];
+    if (!ws || ws.cells.length === 0) return sessionId;
+    return ws.cells[ws.activeCell] ?? ws.cells[0] ?? sessionId;
+  });
+
+  // Keep visited workspaces mounted (hidden) for instant switching. Each id
+  // in this list is a workspace id (what `sessionId` holds after the workspace
+  // refactor), not a backend session id.
+  const allWorkspaceIds = useStore(useShallow(s => s.workspaceOrder));
   const [visitedIds, setVisitedIds] = useState<string[]>([]);
   useEffect(() => {
     if (!sessionId || sessionId === NOTES_SESSION_ID) return;
     setVisitedIds(prev => prev.includes(sessionId) ? prev : [...prev, sessionId]);
   }, [sessionId]);
-  // Remove closed sessions from cache
-  const activeVisited = visitedIds.filter(id => allSessionIds.includes(id));
+  // Drop cached entries for workspaces that no longer exist (e.g. dissolved
+  // via drag-out-last-pane).
+  const activeVisited = visitedIds.filter(id => allWorkspaceIds.includes(id));
 
   const LS_KEY      = 'vipershell:session-tabs';
   const LS_FILE_KEY = 'vipershell:session-last-file';
@@ -96,20 +108,25 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     }
   }, [activeTab]);
 
-  // Restore last opened file when switching to files tab
+  // Restore last opened file when switching to files tab OR when the
+  // active pane changes (each pane remembers its own last file).
   useEffect(() => {
     if (activeTab !== 'files') return;
-    const last = sessionId ? getLastFile(sessionId) : null;
+    const last = activePaneSessionId ? getLastFile(activePaneSessionId) : null;
     if (last) setTimeout(() => openFileRef.current?.(last), 50);
-  }, [activeTab, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, activePaneSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sessionMap = useStore(s => s.sessionMap);
-
-  // Create split: create a new session in the same directory via REST API
+  // Create split: create a new session inheriting the ACTIVE pane's cwd and
+  // return its id. The caller (TerminalGrid) is responsible for attaching the
+  // new session to this workspace via `appendPaneToWorkspace`. Workspaces
+  // themselves have no path — we take the cwd from whichever pane is focused
+  // right now, which is what the user expects when they split.
   const handleCreateSplit = useCallback(async (): Promise<string | null> => {
     if (!sessionId) return null;
-    const session = sessionMap[sessionId];
-    const path = session?.path ?? null;
+    const state = useStore.getState();
+    const ws = state.workspaces[sessionId];
+    const activeSid = ws?.cells[ws.activeCell] ?? null;
+    const path = activeSid ? state.sessionMap[activeSid]?.path ?? null : null;
     try {
       const res = await fetch('/api/sessions', {
         method: 'POST',
@@ -118,15 +135,16 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
       });
       const data = await res.json();
       if (data.ok && data.session_id) {
-        // Immediately register as split so it won't appear in session list
-        useStore.getState().addSplitSession(data.session_id);
-        // Refresh sessions list
+        // Refresh sessions list so the new session appears in sessionMap
+        // (the workspace reconciliation in renderSessions will NOT create a
+        // second workspace for it because TerminalGrid.ensureCells calls
+        // appendPaneToWorkspace synchronously after this returns).
         send({ type: 'list_sessions' });
         return data.session_id;
       }
       return null;
     } catch { return null; }
-  }, [sessionId, sessionMap, send]);
+  }, [sessionId, send]);
 
   const handleFileLinkClick = useCallback(async (rawPath: string) => {
     let cleaned = rawPath;
@@ -138,9 +156,13 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     cleaned = cleaned.replace(/[.,;)'">\]]+$/, '');
 
     let absPath = cleaned;
-    if (!cleaned.startsWith('/') && !cleaned.startsWith('~/') && sessionId) {
+    // Resolve relative paths against the ACTIVE pane's cwd — the user expects
+    // "./foo" in a split pane to open relative to that pane's directory.
+    const wsState = useStore.getState().workspaces[sessionId ?? ''];
+    const resolveAgainst = wsState?.cells[wsState.activeCell] ?? sessionId;
+    if (!cleaned.startsWith('/') && !cleaned.startsWith('~/') && resolveAgainst) {
       try {
-        const res = await fetch(`/api/fs/${encodeURIComponent(sessionId)}/browse`);
+        const res = await fetch(`/api/fs/${encodeURIComponent(resolveAgainst)}/browse`);
         const data = await res.json();
         const cwd = (data.cwd as string) ?? '';
         absPath = cwd ? `${cwd}/${cleaned.replace(/^\.\//, '')}` : cleaned;
@@ -165,36 +187,41 @@ export default function PaneTerminal({ sessionId, send, onTabReady, onConnect }:
     <div className="flex flex-col flex-1 min-w-0 min-h-0" style={{ position: 'relative' }}>
       <SessionStatsBar
         sessionId={sessionId}
-        send={send}
         activeTab={activeTab}
         onTabChange={setActiveTab as (tab: string) => void}
-        onConnect={onConnect}
         layout={gridLayout}
         onLayoutChange={(l) => changeLayoutRef.current?.(l)}
       />
-      {activeVisited.map(vid => (
-        <div
-          key={vid}
-          style={{
-            display: activeTab === 'terminal' && vid === sessionId ? 'flex' : 'none',
-            flex: 1, flexDirection: 'column', minHeight: 0,
-          }}
-        >
-          <TerminalGrid
-            sessionId={vid}
-            onCreateSplit={handleCreateSplit}
-            onFileLinkClick={handleFileLinkClick}
-            onLayoutReady={vid === sessionId ? ({ layout: l, changeLayout }) => {
-              setGridLayout(l);
-              changeLayoutRef.current = changeLayout;
-            } : undefined}
-          />
-        </div>
-      ))}
-      {activeTab === 'diff'   && <GitDiffPane sessionId={sessionId} onOpenFile={(path: string) => { setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />}
-      {activeTab === 'files'  && <FilesPane  sessionId={sessionId} openFileRef={openFileRef} onFileSelect={(path: string) => { saveLastFile(sessionId!, path); setHighlightQuery(null); setHighlightLine(null); }} highlightQuery={highlightQuery} highlightLine={highlightLine} />}
+      {activeVisited.map(vid => {
+        const isVisible = activeTab === 'terminal' && vid === sessionId;
+        return (
+          <div
+            key={vid}
+            style={{
+              display: isVisible ? 'flex' : 'none',
+              flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden',
+            }}
+          >
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <TerminalGrid
+                sessionId={vid}
+                onCreateSplit={handleCreateSplit}
+                onFileLinkClick={handleFileLinkClick}
+                onLayoutReady={vid === sessionId ? ({ layout: l, changeLayout }) => {
+                  setGridLayout(l);
+                  changeLayoutRef.current = changeLayout;
+                } : undefined}
+              />
+            </div>
+          </div>
+        );
+      })}
+      {activeTab === 'diff'   && <GitDiffPane sessionId={activePaneSessionId} onOpenFile={(path: string) => { setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />}
+      <div style={{ display: activeTab === 'files' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
+        <FilesPane sessionId={activePaneSessionId} openFileRef={openFileRef} onFileSelect={(path: string) => { if (activePaneSessionId) saveLastFile(activePaneSessionId, path); setHighlightQuery(null); setHighlightLine(null); }} highlightQuery={highlightQuery} highlightLine={highlightLine} />
+      </div>
       <div style={{ display: activeTab === 'search' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, background: '#0c0c0c' }}>
-        <SearchPanel sessionId={sessionId} onOpenFile={(path: string, query?: string, line?: number) => { setHighlightQuery(query ?? null); setHighlightLine(line ?? null); setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />
+        <SearchPanel sessionId={activePaneSessionId} active={activeTab === 'search'} onOpenFile={(path: string, query?: string, line?: number) => { setHighlightQuery(query ?? null); setHighlightLine(line ?? null); setActiveTab('files'); setTimeout(() => openFileRef.current?.(path), 50); }} />
       </div>
     </div>
   );

@@ -100,7 +100,7 @@ describe('TmuxBridge', () => {
       b._persistSession('$1', 'myshell', '/home/user')
 
       const saved = readSaved()
-      expect(saved['$1']).toEqual({ name: 'myshell', path: '/home/user' })
+      expect(saved['$1']).toEqual({ name: 'myshell', path: '/home/user', sessionType: null })
     })
 
     it('_persistSession updates existing entry', () => {
@@ -109,7 +109,7 @@ describe('TmuxBridge', () => {
       b._persistSession('$1', 'renamed', '/home')
 
       const saved = readSaved()
-      expect(saved['$1']).toEqual({ name: 'renamed', path: '/home' })
+      expect(saved['$1']).toEqual({ name: 'renamed', path: '/home', sessionType: null })
     })
 
     it('_unpersistSession removes entry', () => {
@@ -120,7 +120,7 @@ describe('TmuxBridge', () => {
 
       const saved = readSaved()
       expect(saved['$1']).toBeUndefined()
-      expect(saved['$2']).toEqual({ name: 'other', path: '/home' })
+      expect(saved['$2']).toEqual({ name: 'other', path: '/home', sessionType: null })
     })
 
     it('_unpersistSession is no-op for unknown id', () => {
@@ -153,7 +153,7 @@ describe('TmuxBridge', () => {
 
       const saved = readSaved()
       expect(Object.keys(saved)).toHaveLength(3)
-      expect(saved['$2']).toEqual({ name: 'dev', path: '/home/dev' })
+      expect(saved['$2']).toEqual({ name: 'dev', path: '/home/dev', sessionType: null })
     })
   })
 

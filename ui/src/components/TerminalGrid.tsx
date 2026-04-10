@@ -1,184 +1,402 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Loader2 } from 'lucide-react';
+import { Group, Panel, Separator } from 'react-resizable-panels';
 import TerminalCell from './TerminalCell';
-import useStore from '../store';
+import useStore, { layoutCapacity } from '../store';
+import * as sharedWs from '../sharedWs';
 
-export type Layout = 'single' | 'horizontal' | 'vertical' | 'quad';
+/** Kept in sync with `GridLayout` in store.ts. See the store for docs on
+ *  the three-variant conventions (cells[0] is always the "big" pane). */
+export type Layout =
+  | 'single'
+  | 'horizontal'
+  | 'vertical'
+  | 'three' | 'three-right' | 'three-top' | 'three-bottom'
+  | 'quad';
+
+// Sizes per group: { [groupId]: { [panelId]: percentage } }
+type GroupSizes = Record<string, Record<string, number>>;
 
 interface TerminalGridProps {
+  /** Synthetic workspace id this grid renders. The name stays `sessionId`
+   *  for prop-renaming-cascade avoidance; it is NOT a backend session id. */
   sessionId: string;
+  /** Create a new backend session and return its id, or null on failure.
+   *  Used when the user picks a larger layout than the current cell count. */
   onCreateSplit: () => Promise<string | null>;
   onFileLinkClick?: (path: string) => void;
   onLayoutReady?: (info: { layout: Layout; changeLayout: (l: Layout) => void }) => void;
 }
 
-const LS_KEY = 'vipershell:term-grid';
+// ── Sizes persistence (panel percentages, keyed by workspace id) ────────────
+// Kept separate from the store — this is purely visual chrome and never needs
+// to be observed cross-component.
+const SIZES_KEY = 'vipershell:workspace-sizes';
 
-function loadGridState(sessionId: string): { layout: Layout; cells: string[] } | null {
+function loadSizes(workspaceId: string): GroupSizes {
   try {
-    const map = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    const saved = map[sessionId];
-    if (saved && saved.cells?.length > 0 && saved.cells[0] === sessionId) return saved;
-    return null;
-  } catch { return null; }
+    const map = JSON.parse(localStorage.getItem(SIZES_KEY) || '{}');
+    return map[workspaceId] ?? {};
+  } catch { return {}; }
 }
 
-function saveGridState(sessionId: string, layout: Layout, cells: string[]): void {
+function saveSizes(workspaceId: string, sizes: GroupSizes): void {
   try {
-    const map = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    map[sessionId] = { layout, cells };
-    localStorage.setItem(LS_KEY, JSON.stringify(map));
-  } catch { /* ignore */ }
+    const map = JSON.parse(localStorage.getItem(SIZES_KEY) || '{}');
+    map[workspaceId] = sizes;
+    localStorage.setItem(SIZES_KEY, JSON.stringify(map));
+  } catch { /* quota */ }
 }
 
-function layoutCellCount(layout: Layout): number {
-  switch (layout) {
-    case 'single': return 1;
-    case 'horizontal': return 2;
-    case 'vertical': return 2;
-    case 'quad': return 4;
-  }
-}
+const handleCls = (orientation: 'horizontal' | 'vertical') =>
+  `terminal-resize-handle terminal-resize-handle-${orientation}`;
 
-function gridStyle(layout: Layout): React.CSSProperties {
-  switch (layout) {
-    case 'single':
-      return { gridTemplateColumns: '1fr', gridTemplateRows: '1fr' };
-    case 'horizontal':
-      return { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' };
-    case 'vertical':
-      return { gridTemplateColumns: '1fr', gridTemplateRows: '1fr 1fr' };
-    case 'quad':
-      return { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' };
-  }
-}
+// Panel style: override library defaults so absolute-positioned xterm fills correctly
+const PANEL_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  minHeight: 0,
+  minWidth: 0,
+};
 
-export default function TerminalGrid({ sessionId, onCreateSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
-  // Initialize from localStorage synchronously to avoid overwrite race
-  const [layout, setLayout] = useState<Layout>(() => {
-    return loadGridState(sessionId)?.layout ?? 'single';
-  });
-  const [cells, setCells] = useState<(string | null)[]>(() => {
-    return loadGridState(sessionId)?.cells ?? [sessionId];
-  });
-  const [activeCell, setActiveCell] = useState(0);
+export default function TerminalGrid({ sessionId: workspaceId, onCreateSplit, onFileLinkClick, onLayoutReady }: TerminalGridProps) {
+  // The store is the source of truth for workspace shape. We subscribe with a
+  // shallow selector so changes elsewhere (drag-drop, pane close, etc.) flow
+  // back into this grid automatically.
+  const ws = useStore(useShallow(s => {
+    const w = s.workspaces[workspaceId];
+    if (!w) return null;
+    return { layout: w.layout, cells: w.cells, activeCell: w.activeCell };
+  }));
+
+  const layout: Layout = ws?.layout ?? 'single';
+  const cells: string[] = ws?.cells ?? [];
+  const activeCell: number = ws?.activeCell ?? 0;
+
+  // Panel-resizer percentages are workspace-local, persisted separately.
+  const [sizes, setSizes] = useState<GroupSizes>(() => loadSizes(workspaceId));
+  useEffect(() => { setSizes(loadSizes(workspaceId)); }, [workspaceId]);
+  useEffect(() => { saveSizes(workspaceId, sizes); }, [workspaceId, sizes]);
+
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Guards concurrent `ensureCells` invocations so a rapid layout-change
+  // sequence doesn't spawn duplicate backend sessions.
   const creatingRef = useRef(false);
-  const initializedRef = useRef(false);
 
-  // Register split sessions on mount and when session changes
-  useEffect(() => {
-    const saved = loadGridState(sessionId);
-    if (saved) {
-      setLayout(saved.layout);
-      setCells(saved.cells);
-      // Register all split sessions so they're hidden from sidebar
-      for (let i = 1; i < saved.cells.length; i++) {
-        if (saved.cells[i]) useStore.getState().addSplitSession(saved.cells[i]!);
-      }
-    } else {
-      setLayout('single');
-      setCells([sessionId]);
-    }
-    setActiveCell(0);
-    initializedRef.current = true;
+  const setActiveCell = useCallback((idx: number) => {
+    useStore.getState().setActivePane(workspaceId, idx);
+  }, [workspaceId]);
 
-    // No cleanup — splits stay registered (hidden from sidebar) even when
-    // switching to another session. They're loaded from localStorage on init.
-  }, [sessionId]);
-
-  // Persist grid state — but only after initial restore
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    if (cells.every(c => c !== null)) {
-      saveGridState(sessionId, layout, cells as string[]);
-    }
-  }, [sessionId, layout, cells]);
-
-  // Create any missing sessions in parallel
-  const ensureCells = useCallback((needed: number) => {
+  /** Create backend sessions until the workspace has `needed` panes, then
+   *  attach each to the workspace. Sequential to avoid duplicate creation. */
+  const ensureCells = useCallback(async (needed: number) => {
     if (creatingRef.current) return;
-    setCells(currentCells => {
-      const have = currentCells.length;
-      if (have >= needed) return currentCells;
-
-      const toCreate = needed - have;
-      const next = [...currentCells, ...Array(toCreate).fill(null) as null[]];
-
-      creatingRef.current = true;
-      const promises = Array.from({ length: toCreate }, (_, i) => {
-        const idx = have + i;
-        return onCreateSplit().then(newId => {
-          if (newId) {
-            setCells(prev => {
-              const updated = [...prev];
-              updated[idx] = newId;
-              return updated;
-            });
-          }
-        });
-      });
-      Promise.all(promises).finally(() => { creatingRef.current = false; });
-
-      return next;
-    });
-  }, [onCreateSplit]);
+    const startCount = useStore.getState().workspaces[workspaceId]?.cells.length ?? 0;
+    if (startCount >= needed) return;
+    creatingRef.current = true;
+    try {
+      for (let i = startCount; i < needed; i++) {
+        const newId = await onCreateSplit();
+        if (!newId) break;
+        useStore.getState().appendPaneToWorkspace(workspaceId, newId);
+      }
+    } finally {
+      creatingRef.current = false;
+    }
+  }, [workspaceId, onCreateSplit]);
 
   const changeLayout = useCallback((newLayout: Layout) => {
-    setLayout(newLayout);
-    const needed = layoutCellCount(newLayout);
-    setActiveCell(prev => Math.min(prev, needed - 1));
+    const current = useStore.getState().workspaces[workspaceId];
+    if (!current) return;
+    const needed = layoutCapacity(newLayout);
+    const clampedActive = Math.min(current.activeCell, Math.min(current.cells.length, needed) - 1);
+    // Update layout first so missing cells render as loader placeholders in
+    // the correct final shape while ensureCells fills them in.
+    useStore.getState().setGridState(
+      workspaceId,
+      newLayout,
+      current.cells,
+      Math.max(0, clampedActive),
+    );
     ensureCells(needed);
-  }, [ensureCells]);
+  }, [workspaceId, ensureCells]);
 
-  // Expose layout state to parent
+  /** Remove the pane at `index` from this workspace. Also closes the backend
+   *  session (its PTY). If it was the last pane in the workspace, the
+   *  workspace dissolves automatically (Android-folder style). */
+  const closePane = useCallback((index: number) => {
+    const current = useStore.getState().workspaces[workspaceId];
+    if (!current) return;
+    const sid = current.cells[index];
+    if (!sid) return;
+
+    // Kill the PTY on the backend. The eventual `list_sessions` response will
+    // prune this session from sessionMap, and `renderSessions` will tidy up
+    // any workspaces that reference it.
+    sharedWs.send({ type: 'close_session', session_id: sid });
+
+    // Optimistically remove from the workspace so the UI responds immediately.
+    useStore.getState().removePaneFromWorkspace(workspaceId, index);
+  }, [workspaceId]);
+
   useEffect(() => {
     onLayoutReady?.({ layout, changeLayout });
   }, [layout, changeLayout, onLayoutReady]);
 
-  const visibleCount = layoutCellCount(layout);
+  const onGroupLayoutChanged = useCallback((groupId: string) => (next: Record<string, number>) => {
+    setSizes(prev => ({ ...prev, [groupId]: next }));
+  }, []);
+
+  const renderCell = (index: number) => {
+    const sid = cells[index];
+    if (!sid) {
+      // Loading placeholder — layout has allocated a slot for this cell but
+      // its backend session hasn't been created yet.
+      return (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: '#0c0c0c', color: 'var(--muted-foreground)',
+        }}>
+          <Loader2 size={20} className="animate-spin" />
+        </div>
+      );
+    }
+    return (
+      <TerminalCell
+        sessionId={sid}
+        gridId={workspaceId}
+        paneIndex={index}
+        isActive={activeCell === index}
+        onActivate={() => setActiveCell(index)}
+        onClose={() => closePane(index)}
+        onFileLinkClick={onFileLinkClick}
+      />
+    );
+  };
+
+  const renderLayout = () => {
+    // On mobile, splits are unusable due to limited screen space.
+    // Show only the active pane full-screen with a tab bar to switch.
+    if (isMobile && layout !== 'single' && cells.length > 1) {
+      return (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 6px', background: '#111111',
+            borderBottom: '1px solid var(--border)', flexShrink: 0,
+          }}>
+            {cells.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveCell(i)}
+                style={{
+                  flex: 1, padding: '4px 8px', fontSize: 11,
+                  background: i === activeCell ? 'var(--primary)' : 'transparent',
+                  color: i === activeCell ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                  border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
+                  fontFamily: '"JetBrains Mono", monospace',
+                }}
+              >
+                Pane {i + 1}
+              </button>
+            ))}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {renderCell(activeCell)}
+          </div>
+        </div>
+      );
+    }
+
+    switch (layout) {
+      case 'single':
+        return (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {renderCell(0)}
+          </div>
+        );
+
+      case 'horizontal':
+        return (
+          <Group
+            orientation="horizontal"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+            <Separator className={handleCls('horizontal')} />
+            <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+          </Group>
+        );
+
+      case 'vertical':
+        return (
+          <Group
+            orientation="vertical"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+            <Separator className={handleCls('vertical')} />
+            <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+          </Group>
+        );
+
+      case 'three':
+        // cells[0] is the tall pane on the LEFT, cells[1]/cells[2] stacked right.
+        // Group id 'right' is kept for backwards compat with saved panel sizes.
+        return (
+          <Group
+            orientation="horizontal"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+            <Separator className={handleCls('horizontal')} />
+            <Panel id="right" style={PANEL_STYLE}>
+              <Group
+                orientation="vertical"
+                defaultLayout={sizes.right}
+                onLayoutChanged={onGroupLayoutChanged('right')}
+              >
+                <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+                <Separator className={handleCls('vertical')} />
+                <Panel id="p2" style={PANEL_STYLE}>{renderCell(2)}</Panel>
+              </Group>
+            </Panel>
+          </Group>
+        );
+
+      case 'three-right':
+        // cells[0] is the tall pane on the RIGHT, cells[1]/cells[2] stacked left.
+        return (
+          <Group
+            orientation="horizontal"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="side" style={PANEL_STYLE}>
+              <Group
+                orientation="vertical"
+                defaultLayout={sizes.side}
+                onLayoutChanged={onGroupLayoutChanged('side')}
+              >
+                <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+                <Separator className={handleCls('vertical')} />
+                <Panel id="p2" style={PANEL_STYLE}>{renderCell(2)}</Panel>
+              </Group>
+            </Panel>
+            <Separator className={handleCls('horizontal')} />
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+          </Group>
+        );
+
+      case 'three-top':
+        // cells[0] is the wide pane on the TOP, cells[1]/cells[2] side-by-side below.
+        return (
+          <Group
+            orientation="vertical"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+            <Separator className={handleCls('vertical')} />
+            <Panel id="side" style={PANEL_STYLE}>
+              <Group
+                orientation="horizontal"
+                defaultLayout={sizes.side}
+                onLayoutChanged={onGroupLayoutChanged('side')}
+              >
+                <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+                <Separator className={handleCls('horizontal')} />
+                <Panel id="p2" style={PANEL_STYLE}>{renderCell(2)}</Panel>
+              </Group>
+            </Panel>
+          </Group>
+        );
+
+      case 'three-bottom':
+        // cells[0] is the wide pane on the BOTTOM, cells[1]/cells[2] side-by-side above.
+        return (
+          <Group
+            orientation="vertical"
+            defaultLayout={sizes.main}
+            onLayoutChanged={onGroupLayoutChanged('main')}
+          >
+            <Panel id="side" style={PANEL_STYLE}>
+              <Group
+                orientation="horizontal"
+                defaultLayout={sizes.side}
+                onLayoutChanged={onGroupLayoutChanged('side')}
+              >
+                <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+                <Separator className={handleCls('horizontal')} />
+                <Panel id="p2" style={PANEL_STYLE}>{renderCell(2)}</Panel>
+              </Group>
+            </Panel>
+            <Separator className={handleCls('vertical')} />
+            <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+          </Group>
+        );
+
+      case 'quad':
+        return (
+          <Group
+            orientation="vertical"
+            defaultLayout={sizes.outer}
+            onLayoutChanged={onGroupLayoutChanged('outer')}
+          >
+            <Panel id="top" style={PANEL_STYLE}>
+              <Group
+                orientation="horizontal"
+                defaultLayout={sizes.top}
+                onLayoutChanged={onGroupLayoutChanged('top')}
+              >
+                <Panel id="p0" style={PANEL_STYLE}>{renderCell(0)}</Panel>
+                <Separator className={handleCls('horizontal')} />
+                <Panel id="p1" style={PANEL_STYLE}>{renderCell(1)}</Panel>
+              </Group>
+            </Panel>
+            <Separator className={handleCls('vertical')} />
+            <Panel id="bottom" style={PANEL_STYLE}>
+              <Group
+                orientation="horizontal"
+                defaultLayout={sizes.bottom}
+                onLayoutChanged={onGroupLayoutChanged('bottom')}
+              >
+                <Panel id="p2" style={PANEL_STYLE}>{renderCell(2)}</Panel>
+                <Separator className={handleCls('horizontal')} />
+                <Panel id="p3" style={PANEL_STYLE}>{renderCell(3)}</Panel>
+              </Group>
+            </Panel>
+          </Group>
+        );
+    }
+  };
 
   return (
     <div
       style={{
-        display: 'grid',
         flex: 1,
         minHeight: 0,
-        gap: 1,
-        background: 'var(--border)',
-        transition: 'grid-template-columns 0.2s ease, grid-template-rows 0.2s ease',
-        ...gridStyle(layout),
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        padding: layout === 'single' ? 0 : 8,
+        background: '#0c0c0c',
       }}
     >
-      {cells.map((sid, index) => {
-        const visible = index < visibleCount;
-        return (
-          <div
-            key={sid ?? `loading-${index}`}
-            style={{
-              display: visible ? 'flex' : 'none',
-              minHeight: 0,
-              minWidth: 0,
-              overflow: 'hidden',
-            }}
-          >
-            {sid === null ? (
-              <div style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: '#0c0c0c', color: 'var(--muted-foreground)',
-              }}>
-                <Loader2 size={20} className="animate-spin" />
-              </div>
-            ) : (
-              <TerminalCell
-                sessionId={sid}
-                isActive={activeCell === index}
-                onActivate={() => setActiveCell(index)}
-                onFileLinkClick={onFileLinkClick}
-              />
-            )}
-          </div>
-        );
-      })}
+      {renderLayout()}
     </div>
   );
 }

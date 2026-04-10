@@ -76,9 +76,12 @@ interface MemBuffer {
   lastText: string;
 }
 
+type SessionType = 'claude' | 'codex' | 'hermes' | null;
+
 interface SavedSession {
   name: string;
   path: string;
+  sessionType?: SessionType;
 }
 
 export type BridgeMessage =
@@ -100,6 +103,7 @@ export class TmuxBridge {
   private memory: MemoryStore | null = null;
   private inputBuffers = new Map<string, string>();
   private cachedSessions: Session[] = [];
+  getCachedSessions(): Session[] { return this.cachedSessions; }
   /** Cached git info per directory path — refreshed every 10s */
   private gitCache = new Map<string, { gitRoot: string | null; branch: string | null; dirty: boolean }>();
   private gitCacheInterval: NodeJS.Timeout | null = null;
@@ -177,12 +181,16 @@ export class TmuxBridge {
       }
     }
 
-    // Detect new sessions and persist them
+    // Detect new sessions and persist them; update type for existing ones
     for (const s of sessions) {
+      const sType: SessionType = s.isClaudeCode ? 'claude' : s.isCodex ? 'codex' : s.isHermes ? 'hermes' : null;
       if (!this.knownSessions.has(s.id)) {
         this.knownSessions.add(s.id);
-        this._persistSession(s.id, s.name, s.path);
+        this._persistSession(s.id, s.name, s.path, sType);
         logger.debug(`Session discovered: ${s.id}`);
+      } else if (sType) {
+        // Update persisted type when a tool is detected running
+        this._persistSession(s.id, s.name, s.path, sType);
       }
     }
 
@@ -409,7 +417,7 @@ export class TmuxBridge {
 
     ptyProcess.onData((data) => {
       this.pubsub.publish(sessionId, { type: 'output', data });
-      stream.write(data);
+      if (!stream.destroyed) stream.write(data);
     });
 
     ptyProcess.onExit(() => {
@@ -602,9 +610,9 @@ export class TmuxBridge {
     } catch { /* ignore */ }
   }
 
-  private _persistSession(sessionId: string, name: string, path: string): void {
+  private _persistSession(sessionId: string, name: string, path: string, sessionType?: SessionType): void {
     const saved = this._loadSavedSessions();
-    saved[sessionId] = { name, path };
+    saved[sessionId] = { name, path, sessionType: sessionType ?? saved[sessionId]?.sessionType ?? null };
     this._writeSavedSessions(saved);
   }
 
@@ -636,22 +644,32 @@ export class TmuxBridge {
     const newSaved: Record<string, SavedSession> = {};
     for (const [oldId, sess] of entries) {
       // Skip if a session with that ID or name already exists in tmux
-      // (AI naming may have changed the name, so check ID first)
       if (existingIds.has(oldId) || existingNames.has(sess.name)) {
-        // Keep in saved state — discoverSessions will update the ID
+        // Keep existing sessions in the persistence file
+        newSaved[oldId] = sess;
         continue;
       }
       try {
         const dirArg = `-c ${JSON.stringify(sess.path)}`;
+        // Determine the initial command based on persisted session type
+        const cmdForType: Record<string, string> = {
+          claude: 'claude',
+          codex: 'codex',
+          hermes: 'hermes',
+        };
+        const initCmd = sess.sessionType ? cmdForType[sess.sessionType] : undefined;
+        const shellCmd = initCmd
+          ? `tmux new-session -d -s ${JSON.stringify(sess.name)} ${dirArg} ${JSON.stringify(initCmd)}`
+          : `tmux new-session -d -s ${JSON.stringify(sess.name)} ${dirArg}`;
         await execAsync(
-          `tmux new-session -d -s ${JSON.stringify(sess.name)} ${dirArg} && tmux set-option -t ${JSON.stringify(sess.name)} status off`
+          `${shellCmd} && tmux set-option -t ${JSON.stringify(sess.name)} status off`
         );
         const { stdout } = await execAsync(
           `tmux display-message -t ${JSON.stringify(sess.name)} -p "#{session_id}" 2>/dev/null`
         );
         const newId = stdout.trim() || sess.name;
         newSaved[newId] = sess;
-        logger.info(`Restored session "${sess.name}" at ${sess.path} (${newId})`);
+        logger.info(`Restored session "${sess.name}" at ${sess.path}${initCmd ? ` (running ${initCmd})` : ''} (${newId})`);
       } catch (e) {
         logger.debug(`Failed to restore session "${sess.name}": ${e}`);
       }
@@ -747,14 +765,25 @@ export class TmuxBridge {
   }
 
   diagnostics() {
+    // Per-session PTY details
+    const managedPtyDetails: { sessionId: string; pid: number; cols: number; rows: number }[] = [];
+    for (const [id, m] of this.managed) {
+      managedPtyDetails.push({ sessionId: id, pid: m.pty.pid, cols: m.cols, rows: m.rows });
+    }
+
+    // WebSocket client info (injected by server.ts)
+    const wsDiag = (this as any)._wsClientsDiag?.() ?? { totalConnections: 0, clients: [] };
+
     return {
       managedPtys: this.managed.size,
+      managedPtyDetails,
       scrollbackStreams: this.scrollbackStreams.size,
       memBuffers: this.memBuffers.size,
       inputBuffers: this.inputBuffers.size,
       knownSessions: this.knownSessions.size,
       pubsubChannels: this.pubsub.channelStats(),
       serverMemory: process.memoryUsage(),
+      websockets: wsDiag,
     };
   }
 

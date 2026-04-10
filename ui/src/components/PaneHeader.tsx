@@ -1,0 +1,286 @@
+import { useState, useRef, useEffect } from 'react';
+import { SquareTerminal, ChevronDown, X, Maximize2, Minimize2, GripVertical } from 'lucide-react';
+import { useDraggable } from '@dnd-kit/core';
+import useStore from '../store';
+import * as sharedWs from '../sharedWs';
+import { useDndEnabled } from '../dndEnabled';
+import StatChips from './StatChips';
+import MemoryChip from './MemoryChip';
+import ClaudeIcon from './ClaudeIcon';
+import OpenAIIcon from './OpenAIIcon';
+import HermesIcon from './HermesIcon';
+import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
+
+/** Append U+FE0E (text presentation selector) so browsers don't color-swap symbols as emoji. */
+const forceTextPresentation = (s: string) =>
+  s.replace(/[\u2022-\u3299\u{1F000}-\u{1FAFF}]/gu, m => m + '\uFE0E');
+
+interface PaneHeaderProps {
+  sessionId: string;
+  /** Workspace this pane belongs to. Used as the drag source id. */
+  workspaceId: string;
+  /** Position of this pane within its workspace's `cells` array. Used as
+   *  the drag source index so the drop target knows which pane is moving. */
+  paneIndex: number;
+  isActive: boolean;
+  /** True when this pane owns the grid's bookkeeping (cell 0). Closing it
+   *  tears down the whole grid because every other cell depends on it, but
+   *  the UI no longer calls it out as a "primary" — all panes read as equals. */
+  isGridRoot: boolean;
+  onClose: () => void;
+}
+
+/** Shared style for small icon buttons in the header row. */
+const iconBtnStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 18, height: 18, borderRadius: 4,
+  background: 'none', border: 'none', cursor: 'pointer',
+  color: 'var(--muted-foreground)', flexShrink: 0,
+  transition: 'color 0.15s',
+};
+
+export default function PaneHeader({ sessionId, workspaceId, paneIndex, isActive, isGridRoot, onClose }: PaneHeaderProps) {
+  const session     = useStore(s => s.sessionMap[sessionId]);
+  const showConfirm = useStore(s => s.showConfirm);
+  const lastCommand = useStore(s => s.sessionLastCommand[sessionId] ?? null);
+  const isZen       = useStore(s => s.zenSessionId === sessionId);
+  const toggleZen   = useStore(s => s.toggleZen);
+  const [editing, setEditing]     = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  async function commitRename() {
+    setEditing(false);
+    const trimmed = draftName.trim();
+    if (!trimmed || trimmed === session?.name) return;
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed }),
+    });
+  }
+
+  async function handleClose(e: React.MouseEvent) {
+    e.stopPropagation();
+    const name = session?.name ?? 'pane';
+    const msg = isGridRoot
+      ? `Close "${name}" and all its panes?`
+      : `Close pane "${name}"?`;
+    const confirmed = await showConfirm(msg);
+    if (!confirmed) return;
+    onClose();
+  }
+
+  // StatChips wants a `send` callback it uses to spawn new sessions from worktrees.
+  // The shared WebSocket is the canonical channel for that in the rest of the app.
+  const send = (msg: Record<string, unknown>) => sharedWs.send(msg);
+
+  // Drag handle — dnd-kit useDraggable. The same `kind: 'pane'` payload as
+  // sidebar PaneCards, so the central onDragEnd in App.tsx handles drops
+  // uniformly regardless of which surface initiated the drag. Disabled on
+  // mobile (and the grip icon is hidden entirely).
+  const dndEnabled = useDndEnabled();
+  const {
+    attributes: dragAttributes,
+    listeners: dragListeners,
+    setNodeRef: setDragRef,
+    isDragging,
+  } = useDraggable({
+    id: `pane-source:header:${workspaceId}:${paneIndex}`,
+    data: { kind: 'pane', sessionId, workspaceId, paneIdx: paneIndex },
+    disabled: !dndEnabled,
+  });
+
+  if (!session) {
+    // Loading placeholder — matches real header height so layout doesn't jump.
+    return <div style={{ height: 42, flexShrink: 0, borderBottom: '1px solid var(--border)', background: '#0a0a0a' }} />;
+  }
+
+  const isAi = session.isClaudeCode || session.isCodex || session.isHermes;
+
+  return (
+    <div
+      className="pane-header"
+      style={{
+        display: 'flex', flexDirection: 'column',
+        flexShrink: 0, minWidth: 0,
+        borderBottom: '1px solid var(--border)',
+        background: isActive
+          ? 'linear-gradient(135deg, rgba(0,116,217,0.12) 0%, rgba(0,146,150,0.12) 100%), #0a0a0a'
+          : '#0a0a0a',
+        transition: 'background 0.15s ease',
+        userSelect: 'none',
+        color: 'var(--foreground)',
+      }}
+    >
+      {/* Row 1: identity + actions */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '3px 6px 2px 4px',
+        minHeight: 22, minWidth: 0,
+        fontSize: 11,
+      }}>
+        {/* Drag handle — hidden entirely on mobile where dnd-kit is off. */}
+        {dndEnabled && (
+          <span
+            ref={setDragRef}
+            {...dragAttributes}
+            {...dragListeners}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to move or swap this pane"
+            className="pane-header-grip"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 14, height: 18, flexShrink: 0,
+              color: 'var(--muted-foreground)', opacity: isDragging ? 0.2 : 0.5,
+              cursor: isDragging ? 'grabbing' : 'grab',
+            }}
+          >
+            <GripVertical size={11} />
+          </span>
+        )}
+        {/* Session kind icon */}
+        <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.85 }}>
+          {session.isClaudeCode ? <ClaudeIcon size={12} />
+            : session.isCodex    ? <OpenAIIcon size={12} />
+            : session.isHermes   ? <HermesIcon size={12} />
+            : <SquareTerminal size={12} style={{ opacity: 0.6 }} />}
+        </span>
+
+        {/* Session name popover — rename + last command */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 3,
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: '1px 4px', borderRadius: 3,
+                color: 'var(--foreground)', fontSize: 11,
+                fontFamily: 'inherit', flexShrink: 0,
+                fontWeight: isActive ? 600 : 400,
+              }}
+              className="hover:bg-white/5"
+              title="Session info"
+            >
+              <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {forceTextPresentation(session.name ?? '')}
+              </span>
+              <ChevronDown size={9} style={{ opacity: 0.4, flexShrink: 0 }} />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent side="bottom" align="start">
+            <div style={{ width: 280, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, opacity: 0.6 }}>
+                  Session name
+                </div>
+                {editing ? (
+                  <input
+                    ref={inputRef}
+                    value={draftName}
+                    onChange={e => setDraftName(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                      if (e.key === 'Escape') setEditing(false);
+                    }}
+                    style={{
+                      fontSize: 12, color: 'var(--foreground)', background: 'var(--input)',
+                      border: '1px solid var(--ring)', borderRadius: 4, padding: '3px 8px',
+                      outline: 'none', fontFamily: 'inherit', width: '100%',
+                    }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setDraftName(session.name ?? ''); setEditing(true); }}
+                    className="hover:bg-white/5"
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      fontSize: 12, color: 'var(--foreground)', background: 'none',
+                      border: '1px solid transparent', borderRadius: 4, padding: '3px 8px',
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                    title="Click to rename"
+                  >
+                    {forceTextPresentation(session.name ?? '')}
+                  </button>
+                )}
+              </div>
+              {lastCommand && (
+                <div style={{ padding: '8px 12px' }}>
+                  <div style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, opacity: 0.6 }}>
+                    Last command
+                  </div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--foreground)',
+                    fontFamily: '"JetBrains Mono",monospace',
+                    opacity: 0.8, wordBreak: 'break-all',
+                    maxHeight: 80, overflow: 'auto',
+                  }}>
+                    {lastCommand}
+                  </div>
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* cwd */}
+        {session.path && (
+          <span
+            style={{
+              fontSize: 10, fontFamily: '"JetBrains Mono",monospace',
+              color: 'var(--muted-foreground)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              flexShrink: 1, minWidth: 0, fontWeight: 600,
+            }}
+            title={session.path}
+          >
+            {session.path.replace(/^\/Users\/[^/]+/, '~')}
+          </span>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Zen toggle — enters/exits distraction-free fullscreen */}
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleZen(sessionId); }}
+          title={isZen ? 'Exit zen mode' : 'Zen mode (fullscreen)'}
+          className="hover:bg-white/5"
+          style={iconBtnStyle}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--primary)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)'; }}
+        >
+          {isZen ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+        </button>
+
+        {/* Close — on the grid's root cell, confirms and tears down the
+            whole grid; on other cells, removes just that pane. */}
+        <button
+          onClick={handleClose}
+          title="Close pane"
+          className="hover:bg-white/5"
+          style={iconBtnStyle}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--destructive)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)'; }}
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      {/* Row 2: git + system stats — single compact row */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '0 8px 2px 10px',
+        height: 18, minWidth: 0,
+        fontSize: 10,
+      }}>
+        <StatChips sessionId={sessionId} send={send} />
+        {isAi && <MemoryChip sessionId={sessionId} />}
+      </div>
+    </div>
+  );
+}

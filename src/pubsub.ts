@@ -10,7 +10,11 @@ export class PubSub<T> {
   }
 
   unsubscribe(channel: string, fn: Subscriber<T>): void {
-    this.channels.get(channel)?.delete(fn);
+    const set = this.channels.get(channel);
+    if (set) {
+      set.delete(fn);
+      if (set.size === 0) this.channels.delete(channel);
+    }
   }
 
   publish(channel: string, msg: T): void {

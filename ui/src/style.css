@@ -36,7 +36,7 @@
     cursor: pointer; position: relative; vertical-align: middle;
   }
   input[type="checkbox"]:checked {
-    background: var(--primary); border-color: var(--primary);
+    background: var(--primary-gradient); border-color: var(--primary-end);
   }
   input[type="checkbox"]:checked::after {
     content: ''; position: absolute; left: 3.5px; top: 1px;
@@ -72,16 +72,22 @@
   }
 }
 
-/* ── shadcn/ui CSS variables — Toxic Neon palette ────────────────────────────── */
+/* ── shadcn/ui CSS variables — Hindsight palette (blue → teal) ───────────────── */
+/* See /CLAUDE.md for the full palette spec and usage rules.                    */
 :root {
   --background:             #0c0c0c;
   --foreground:             #d4d4d8;
   --card:                   #111111;
   --card-foreground:        #d4d4d8;
-  --popover:                #111111;
+  --popover:                #1a1a1a;
   --popover-foreground:     #d4d4d8;
-  --primary:                #4ADE80;
-  --primary-foreground:     #0c0c0c;
+  --primary:                #0074d9;
+  --primary-end:            #009296;
+  --primary-foreground:     #ffffff;
+  --primary-gradient:       linear-gradient(135deg, #0074d9 0%, #009296 100%);
+  --primary-gradient-hover: linear-gradient(135deg, #005db0 0%, #007a7d 100%);
+  --primary-tint:           linear-gradient(135deg, rgba(0,116,217,0.10) 0%, rgba(0,146,150,0.10) 100%);
+  --dark-surface-gradient:  linear-gradient(135deg, #0f1419 0%, #0d1117 100%);
   --secondary:              #1a1a1a;
   --secondary-foreground:   #d4d4d8;
   --muted:                  #1a1a1a;
@@ -92,13 +98,13 @@
   --destructive-foreground: #d4d4d8;
   --border:                 #222222;
   --input:                  #222222;
-  --ring:                   #4ADE80;
+  --ring:                   #0074d9;
   --radius:                 0.375rem;
 
-  /* Semantic extras */
+  /* Semantic extras — green stays for success/healthy/additions */
   --success:                #4ADE80;
   --warning:                #FACC15;
-  --session-active-bg:      #0f1f14;
+  --session-active-bg:      #0b1a24;
 }
 
 @theme inline {
@@ -136,8 +142,19 @@
   fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 
+/* ── Brand gradient text utility ──────────────────────────────────────────── */
+/* Use for hero text / logo wordmarks where you want the blue→teal gradient. */
+.brand-gradient-text {
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
 /* ── Logo ───────────────────────────────────────────────────────────────────── */
 .logo { font-size: 15px; font-weight: 700; color: var(--foreground); letter-spacing: -0.5px; font-family: 'Space Grotesk', sans-serif; display: flex; align-items: center; gap: 5px; }
+.logo .brand-gradient-text { display: inline-block; }
 
 /* ── Status dot ─────────────────────────────────────────────────────────────── */
 .status-dot {
@@ -161,7 +178,7 @@
 
 .empty-state { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
 
-.session-workspace .session-item { padding-left: 24px; }
+.session-workspace .session-item { padding-left: 18px; }
 
 /* Prevent the Radix scroll viewport from computing width from content,
    which would break text-overflow: ellipsis and push flex items off screen */
@@ -191,21 +208,556 @@
 
 .session-item {
   position: relative;
-  display: flex; align-items: center; gap: 5px; padding: 4px 6px 4px 20px;
-  cursor: pointer; border-left: 3px solid transparent; transition: background 0.1s;
+  display: flex; align-items: stretch; gap: 4px;
+  /* Inset the row so the card has breathing room on both sides. The extra
+     top padding leaves room for the workspace-grip-top strip to sit on the
+     top edge without overlapping the PaneGrid below. */
+  padding: 14px 8px 8px 12px;
+  margin: 0 6px 6px 6px;
+  cursor: pointer;
+  /* Subtle card look for inactive rows — flat dark background + hairline
+     border + rounded corners. Each workspace reads as its own card even
+     when nothing is selected. */
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
   min-width: 0;
+  overflow: hidden;
 }
-.session-item:hover  { background: var(--accent); }
-.session-item.active { background: rgba(255,255,255,0.04); border-left-color: var(--primary); }
+/* On mobile (or wherever dnd is disabled) there's no grip strip, so we
+ * can reclaim the top padding. */
+.session-item.session-item-no-grip {
+  padding-top: 8px;
+}
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.session-item.active {
+  /* Stronger, brand-tinted fill so the selected row is unmistakable and
+     clearly distinct from the amber "unseen" notification state. */
+  background: rgba(0, 116, 217, 0.16);
+  border-color: rgba(0, 116, 217, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 116, 217, 0.35), 0 0 14px rgba(0, 116, 217, 0.18);
+}
+.session-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--primary-gradient);
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+/* ── Unseen notification highlight ──────────────────────────────────────────
+   Muted amber so it reads as distinct from the blue "selected" state without
+   being visually noisy. No glow — just a subtle bar + faint tint. */
+@keyframes session-unseen-bar-pulse {
+  0%, 100% { opacity: 0.9; }
+  50%      { opacity: 0.55; }
+}
+.session-item.unseen:not(.active) {
+  background: rgba(250, 204, 21, 0.06);
+  border-color: rgba(250, 204, 21, 0.35);
+}
+.session-item.unseen:not(.active)::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: rgba(250, 204, 21, 0.75);
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  animation: session-unseen-bar-pulse 2s ease-in-out infinite;
+}
 
 .session-icon {
   display: flex; align-items: center; flex-shrink: 0;
   color: var(--muted-foreground); opacity: 0.4; transition: opacity 0.3s;
 }
 .session-item.active .session-icon { opacity: 0.7; }
-.session-item.unseen .session-icon { opacity: 1; color: #4ADE80; }
+.session-item.unseen .session-icon { opacity: 1; color: var(--warning); }
 
-.session-name-unseen { color: #4ADE80 !important; opacity: 1 !important; }
+.session-name-unseen { color: var(--primary) !important; opacity: 1 !important; }
+
+/* ── Pane grid inside the session item ─────────────────────────────────────
+   Each pane = a PaneCard with its own icon / name / timestamp / git row.
+   The grid container arranges PaneCards in the shape of the split layout. */
+.pane-grid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  /* Slightly larger gap than before so the perched corner badges from
+     neighbouring tight-mode cards don't collide. */
+  gap: 10px;
+  /* Top padding gives the first row's badges room to overhang upward
+     without being clipped by the session-item row above. */
+  padding-top: 4px;
+}
+/* Heights below are sized for a 3-row card (name + cwd + git). The card
+   grows naturally when rows are missing, so these are lower bounds. */
+.pane-grid-single { flex-direction: column; min-height: 72px; }
+.pane-grid-horizontal { flex-direction: row; min-height: 72px; }
+.pane-grid-horizontal > .pane-card { flex: 1 1 0; min-width: 0; }
+.pane-grid-vertical { flex-direction: column; min-height: 148px; }
+.pane-grid-vertical > .pane-card { flex: 1 1 0; min-height: 0; }
+.pane-grid-quad {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+  min-height: 148px;
+}
+.pane-grid-quad > .pane-card { min-width: 0; min-height: 0; }
+.pane-grid-three { flex-direction: row; min-height: 148px; }
+.pane-grid-three-left,
+.pane-grid-three-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+.pane-grid-three-left { flex: 1.2 1 0; }
+.pane-grid-three-right { flex: 1 1 0; }
+.pane-grid-three-left > .pane-card,
+.pane-grid-three-right > .pane-card { flex: 1 1 0; min-height: 0; }
+
+/* ── Flat three-pane layouts ───────────────────────────────────────────────
+ *  All three PaneCards are direct children of a single CSS grid container.
+ *  This is what makes dnd-kit's rectSortingStrategy work — sortable items
+ *  must share a parent so the slide animations can compute correct rects
+ *  without being trapped in nested wrappers. The "big" pane (cells[0])
+ *  always occupies the wider/taller area; the other two stack opposite. */
+.pane-grid-three-flat {
+  display: grid;
+  gap: 10px;
+  min-height: 148px;
+}
+.pane-grid-three-flat > .pane-card {
+  min-width: 0;
+  min-height: 0;
+}
+/* three (legacy default): tall left + 2 stacked right */
+.pane-grid-three-flat-left {
+  grid-template-columns: 1.2fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  grid-template-areas:
+    "big b"
+    "big c";
+}
+/* three-right: tall right + 2 stacked left */
+.pane-grid-three-flat-right {
+  grid-template-columns: 1fr 1.2fr;
+  grid-template-rows: 1fr 1fr;
+  grid-template-areas:
+    "b big"
+    "c big";
+}
+/* three-top: wide top + 2 side-by-side bottom */
+.pane-grid-three-flat-top {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1.2fr 1fr;
+  grid-template-areas:
+    "big big"
+    "b   c";
+}
+/* three-bottom: 2 side-by-side top + wide bottom */
+.pane-grid-three-flat-bottom {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1.2fr;
+  grid-template-areas:
+    "b   c"
+    "big big";
+}
+
+.pane-card {
+  position: relative;   /* anchor for the perched corner badge */
+  display: flex;
+  flex-direction: column;
+  /* Stack rows top-down with consistent breathing room. Do NOT center —
+     centering a 3-row block inside a short grid clips the bottom row. */
+  justify-content: flex-start;
+  gap: 6px;
+  /* Left padding reserves a narrow strip for the corner badge's *interior*
+     half; the other half hangs off the card's top-left edge. */
+  padding: 9px 11px 9px 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  min-width: 0;
+  min-height: 0;
+  /* overflow MUST be visible so the badge can hang off the top-left corner
+     like a bird perched on the border. Text ellipsis doesn't need it on
+     this element — each row clips its own content. */
+  overflow: visible;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.pane-card-active {
+  background: rgba(0, 116, 217, 0.14);
+  border-color: rgba(0, 116, 217, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(0, 116, 217, 0.25);
+}
+@keyframes pane-card-unseen-pulse {
+  0%, 100% { border-color: rgba(250, 204, 21, 0.7); }
+  50%      { border-color: rgba(250, 204, 21, 0.35); }
+}
+.pane-card-unseen {
+  animation: pane-card-unseen-pulse 2s ease-in-out infinite;
+}
+
+/* Corner badge — session kind icon perched on the top-left corner of the
+   card, half in / half out. The overhang is what makes it feel like a
+   little bird sitting on a fence rail rather than an icon floating
+   inside the card. */
+.pane-card-badge {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  z-index: 2;    /* layer above sibling cards in tight grid layouts */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #141821;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.pane-card-active .pane-card-badge {
+  color: #ffffff;
+  background: var(--primary-gradient);
+  border-color: color-mix(in srgb, var(--primary-end) 65%, transparent);
+  box-shadow:
+    0 2px 8px rgba(0, 116, 217, 0.45),
+    0 0 0 1px rgba(0, 116, 217, 0.25);
+}
+.pane-card-unseen .pane-card-badge {
+  color: rgba(250, 204, 21, 0.85);
+  border-color: rgba(250, 204, 21, 0.4);
+}
+
+/* Row 1: name (icon is now the corner badge) */
+.pane-card-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.pane-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  opacity: 0.92;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.1px;
+}
+.pane-card-active .pane-card-name { opacity: 1; }
+
+.pane-card-time {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  flex-shrink: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pane-card-active .pane-card-time { opacity: 0.85; }
+
+/* Row 2: current working directory (last path component) + relative time.
+   Dedicated row because the cwd is the ground-truth "what is this pane
+   working on" signal. Time lives here (instead of row 1) so the name row
+   can use the full card width — critical in quad layouts. */
+.pane-card-cwd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--foreground);
+  opacity: 0.75;
+  min-width: 0;
+  line-height: 1.3;
+}
+.pane-card-active .pane-card-cwd-row { opacity: 0.95; }
+.pane-card-cwd-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+/* Time inside the cwd row hugs the right edge. Opacity ties it visually
+   to the cwd (secondary info) without competing with the name. */
+.pane-card-cwd-row .pane-card-time {
+  margin-left: auto;
+  opacity: 0.55;
+}
+
+/* Row 3: git branch + PR state */
+.pane-card-git {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  opacity: 0.82;
+  min-width: 0;
+  line-height: 1.3;
+}
+.pane-card-git > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-card-dirty-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+}
+
+/* Tight mode — cards in horizontal/three/quad layouts get less horizontal
+   space. Shrink badge, font sizes, and padding proportionally, but keep
+   all 3 rows so every card looks consistent. The badge overhangs a bit
+   less in tight mode so it doesn't poke too far into neighbouring cards. */
+.pane-card-tight {
+  padding: 6px 7px 6px 14px;
+  gap: 4px;
+}
+.pane-card-tight .pane-card-badge {
+  top: -7px;
+  left: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+.pane-card-tight .pane-card-row { gap: 5px; }
+.pane-card-tight .pane-card-name { font-size: 11px; }
+.pane-card-tight .pane-card-time { font-size: 9px; }
+.pane-card-tight .pane-card-cwd-row { font-size: 10px; gap: 5px; }
+.pane-card-tight .pane-card-git { font-size: 10px; gap: 5px; }
+
+/* ── Pane drag-and-drop (move panes between workspaces) ───────────────────── */
+.pane-card-draggable { cursor: grab; }
+.pane-card-draggable:active { cursor: grabbing; }
+.pane-card-dragging {
+  opacity: 0.4;
+  transform: scale(0.96);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.session-item.pane-drop-target {
+  outline: 1.5px dashed var(--primary);
+  outline-offset: -2px;
+  background: rgba(0, 116, 217, 0.10);
+}
+.session-item.pane-drop-target .pane-grid {
+  box-shadow: 0 0 0 1px rgba(0, 116, 217, 0.4), 0 0 12px rgba(0, 116, 217, 0.25);
+  border-radius: 4px;
+  transition: box-shadow 0.12s;
+}
+.session-item.pane-drop-target-full {
+  outline-color: var(--destructive);
+  background: rgba(248, 113, 113, 0.10);
+}
+.session-item.pane-drop-target-full .pane-grid { box-shadow: none; }
+
+/* Per-card drop highlight — shown when hovering a pane card with another
+ * pane in flight (intra-workspace swap or cross-workspace insert). */
+.pane-card-drop-target {
+  box-shadow: inset 0 0 0 1.5px var(--primary), 0 0 10px rgba(0, 116, 217, 0.35);
+  background: rgba(0, 116, 217, 0.12);
+}
+
+/* Empty "drop here" placeholder slot rendered when a foreign pane is being
+ * dragged over a workspace with room for one more pane. Looks distinct from
+ * a real PaneCard so the user understands it's a target, not content. */
+.pane-card-placeholder {
+  background: rgba(0, 116, 217, 0.10);
+  border: 1.5px dashed rgba(0, 116, 217, 0.55);
+  box-shadow: inset 0 0 12px rgba(0, 116, 217, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  animation: pane-card-placeholder-pulse 1.6s ease-in-out infinite;
+  cursor: copy;
+}
+.pane-card-placeholder-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+@keyframes pane-card-placeholder-pulse {
+  0%, 100% { box-shadow: inset 0 0 12px rgba(0, 116, 217, 0.10); border-color: rgba(0, 116, 217, 0.55); }
+  50%      { box-shadow: inset 0 0 18px rgba(0, 116, 217, 0.22); border-color: rgba(0, 116, 217, 0.85); }
+}
+
+/* Grip handle in pane header — fades in on row hover, cursor swaps while drag. */
+.pane-header-grip { transition: opacity 0.15s, color 0.15s; }
+.pane-header:hover .pane-header-grip { opacity: 0.9; color: var(--foreground); }
+.pane-header-grip:active { cursor: grabbing; }
+.pane-header-grip-dragging { opacity: 0.3; }
+
+/* ── Workspace grip (top strip) ────────────────────────────────────────────
+ *  Sits on the TOP edge of each .session-item card. Only drag source for
+ *  workspace reorder — clicks on it bubble nowhere (the dnd-kit listeners
+ *  handle them), and clicks anywhere else in the row select the workspace.
+ *  Fades in on row hover so the card stays clean when idle. */
+.workspace-grip-top {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+  opacity: 0;
+  cursor: grab;
+  transition: opacity 0.15s, color 0.15s;
+  user-select: none;
+  /* Sit above the rounded card outline so the icon isn't clipped. */
+  z-index: 2;
+  /* No background by default — only a centered grip icon shows. */
+  pointer-events: auto;
+}
+.workspace-grip-top::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  top: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s;
+}
+.session-item:hover .workspace-grip-top { opacity: 0.7; }
+.session-item:hover .workspace-grip-top:hover { opacity: 1; color: var(--foreground); }
+.session-item:hover .workspace-grip-top:hover::before { background: rgba(0, 116, 217, 0.45); }
+.session-item.active .workspace-grip-top { opacity: 0.6; color: var(--primary); }
+.session-item.active:hover .workspace-grip-top { opacity: 1; color: var(--primary); }
+.session-item.active:hover .workspace-grip-top::before { background: rgba(0, 116, 217, 0.55); }
+.workspace-grip-top:active { cursor: grabbing; }
+
+/* Floating preview rendered by dnd-kit's DragOverlay. It's NOT inside the
+ * sidebar's flex column, so it has its own width and shadow. */
+.session-item-overlay {
+  width: 260px;
+  cursor: grabbing !important;
+  background: rgba(0, 116, 217, 0.16);
+  border: 1px solid rgba(0, 116, 217, 0.6);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 116, 217, 0.4),
+              0 0 28px rgba(0, 116, 217, 0.35);
+  transform: rotate(-1.2deg);
+}
+.workspace-grip-overlay { opacity: 1 !important; color: var(--primary) !important; }
+.workspace-grip-overlay::before { background: rgba(0, 116, 217, 0.55) !important; }
+
+/* ── Gap drop zone (single, at the bottom of the sidebar) ─────────────────
+ *  Lives below the last workspace row. Invisible and zero-hit when idle;
+ *  while a *pane* drag is in flight, expands to a clearly labeled drop slot
+ *  ("Drop to create a new workspace"); strong blue glow + bigger when
+ *  hovered. There's only one of these — the user complained that having a
+ *  gap between every workspace was visually noisy. */
+.gap-drop-zone {
+  position: relative;
+  height: 0;
+  margin: 0 6px;
+  transition: height 0.18s ease, margin 0.18s ease;
+  pointer-events: none;
+}
+.gap-drop-zone-line {
+  position: absolute;
+  inset: 6px 6px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1.5px dashed transparent;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  pointer-events: none;
+}
+.gap-drop-zone-label {
+  position: absolute;
+  inset: 6px 6px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.gap-drop-zone-label svg { flex-shrink: 0; }
+/* Armed: a *pane* drag is active — show the drop slot with a dashed
+ * outline and a "Drop to create a new workspace" label so the user knows
+ * exactly what dropping here will do. */
+.gap-drop-zone-armed {
+  height: 72px;
+  margin: 8px 6px 12px;
+  pointer-events: auto;
+}
+.gap-drop-zone-armed .gap-drop-zone-line {
+  border-color: rgba(0, 116, 217, 0.50);
+  background: rgba(0, 116, 217, 0.06);
+}
+.gap-drop-zone-armed .gap-drop-zone-label {
+  opacity: 0.85;
+}
+/* Hovered: this specific gap is the drop target — solid blue tint, stronger
+ * border + glow, label brightens. */
+.gap-drop-zone-hover {
+  height: 84px;
+  margin: 10px 6px 14px;
+}
+.gap-drop-zone-hover .gap-drop-zone-line {
+  border-color: var(--primary);
+  border-style: solid;
+  background: rgba(0, 116, 217, 0.18);
+  box-shadow: 0 0 16px rgba(0, 116, 217, 0.45), inset 0 0 12px rgba(0, 116, 217, 0.18);
+}
+.gap-drop-zone-hover .gap-drop-zone-label {
+  opacity: 1;
+  color: var(--foreground);
+  text-shadow: 0 0 10px rgba(0, 116, 217, 0.6);
+}
+
+/* ── Pane card overlay (DragOverlay floating preview) ─────────────────────
+ *  Shown by dnd-kit's DragOverlay while the user is dragging a pane. Mirrors
+ *  the look of a sidebar PaneCard but stands alone and floats with the
+ *  cursor. Slight rotation + glow for the "picked up" feel. */
+.pane-card-overlay {
+  width: 220px;
+  cursor: grabbing !important;
+  background: rgba(0, 116, 217, 0.18);
+  border: 1px solid rgba(0, 116, 217, 0.6);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 116, 217, 0.4),
+              0 0 28px rgba(0, 116, 217, 0.35);
+  transform: rotate(-1.5deg);
+}
 
 .session-name-inline {
   font-size: 11px; color: var(--foreground); opacity: 0.8;
@@ -215,8 +767,9 @@
 
 .session-pane-badge {
   font-size: 9px; font-weight: 700; font-family: monospace;
-  color: var(--primary); background: color-mix(in srgb, var(--primary) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  color: #ffffff;
+  background: var(--primary-gradient);
+  border: 1px solid color-mix(in srgb, var(--primary-end) 60%, transparent);
   border-radius: 3px; padding: 0 3px; line-height: 14px;
   flex-shrink: 0; letter-spacing: 0;
 }
@@ -229,10 +782,9 @@
 .session-item:hover .session-add-pane-btn { opacity: 1; }
 .session-item.active .session-add-pane-btn { opacity: 0.6; }
 .session-item.active .session-add-pane-btn:hover { opacity: 1; }
+.session-item:hover .session-action-btn { opacity: 0.6; }
+.session-item .session-action-btn:hover { opacity: 1 !important; background: rgba(255,255,255,0.08); }
 
-.session-time {
-  font-size: 10px; color: var(--muted-foreground); opacity: 0.4; flex-shrink: 0;
-}
 .session-path {
   font-size: 10px; color: var(--muted-foreground); margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -247,25 +799,78 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-.terminal-pane { position: absolute; inset: 0; padding: 8px; overflow: hidden; animation: terminal-fade-in 0.3s ease-out; }
-.terminal-pane .xterm-viewport { overflow-y: scroll !important; overscroll-behavior: contain; touch-action: pan-y; }
-/* touch-action: none lets JS handlers (and xterm's own) fully control touch on the canvas overlay.
-   pan-y here would be ignored anyway: xterm-screen is a *sibling* of xterm-viewport so the browser
-   can't reach the viewport as a scroll ancestor, and it fights xterm's preventDefault() calls. */
+@keyframes zen-enter {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.terminal-pane { position: absolute; inset: 0; padding: 8px; overflow: hidden; animation: terminal-fade-in 0.3s ease-out; z-index: 1; background: #111111; }
+.terminal-pane .xterm-viewport {
+  overflow-y: scroll !important;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  /* Transparent background so the canvas (which is a sibling below)
+     shows through. The viewport is only used for the scrollbar. */
+  background-color: transparent !important;
+}
+/* Scrollbar styling — wider and more visible for easy grabbing */
+.terminal-pane .xterm-viewport::-webkit-scrollbar {
+  width: 12px;
+  background: transparent;
+}
+.terminal-pane .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-pane .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  min-height: 30px;
+}
+.terminal-pane .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.32);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+/* touch-action: none lets JS handlers (and xterm's own) fully control touch on the canvas overlay. */
 .terminal-pane .xterm-screen  { touch-action: none; }
 
 /* ── Terminal grid resize handles ──────────────────────────────────────────── */
 .terminal-resize-handle {
   flex-shrink: 0;
-  background: var(--border);
+  background: transparent;
+  position: relative;
   transition: background 0.15s;
 }
-.terminal-resize-handle:hover,
-.terminal-resize-handle[data-resize-handle-active] {
-  background: var(--primary);
+.terminal-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--primary-gradient);
+  transition: box-shadow 0.15s, filter 0.15s;
 }
-.terminal-resize-handle-horizontal { width: 3px; cursor: col-resize; }
-.terminal-resize-handle-vertical   { height: 3px; cursor: row-resize; }
+.terminal-resize-handle:hover::before,
+.terminal-resize-handle[data-separator="enabled"]:active::before,
+.terminal-resize-handle[data-resize-handle-active]::before {
+  filter: brightness(1.25);
+  box-shadow: 0 0 8px var(--primary);
+}
+.terminal-resize-handle-horizontal {
+  width: 8px;
+  cursor: col-resize;
+}
+.terminal-resize-handle-horizontal::before {
+  left: 3px;
+  right: 3px;
+}
+.terminal-resize-handle-vertical {
+  height: 8px;
+  cursor: row-resize;
+}
+.terminal-resize-handle-vertical::before {
+  top: 3px;
+  bottom: 3px;
+}
 
 /* ── Split pane header ──────────────────────────────────────────────────────── */
 .pane-header-btn {
@@ -318,7 +923,7 @@
 .md-preview h2 { font-size: 1.4em; border-bottom: 1px solid #222222; }
 .md-preview h3 { font-size: 1.15em; }
 .md-preview p  { margin: 0.6em 0; }
-.md-preview a  { color: #4ADE80; text-decoration: none; }
+.md-preview a  { color: var(--primary); text-decoration: none; }
 .md-preview a:hover { text-decoration: underline; }
 .md-preview code {
   background: #111111; color: #F87171; border-radius: 4px;
@@ -341,3 +946,4 @@
 .md-preview tr:nth-child(even) { background: #0c0c0c; }
 .md-preview hr { border: none; border-top: 1px solid #222222; margin: 1.2em 0; }
 .md-preview img { max-width: 100%; border-radius: 6px; }
+

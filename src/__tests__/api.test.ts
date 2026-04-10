@@ -3,7 +3,7 @@ import express from 'express'
 import { createServer } from 'http'
 import type { AddressInfo } from 'net'
 import { createApiRouter } from '../api.js'
-import type { TmuxBridge } from '../bridge.js'
+import type { DirectBridge } from '../direct-bridge.js'
 import type { MemoryStore, MemoryConfig } from '../memory.js'
 import type { LogBuffer } from '../server.js'
 import type { AIService } from '../ai.js'
@@ -14,7 +14,7 @@ const mockSessions = [
   { id: '$0', name: 'shell', path: '/tmp', username: 'test', last_activity: 1000, busy: false },
 ]
 
-const mockBridge: TmuxBridge = {
+const mockBridge: DirectBridge = {
   listSessions: vi.fn().mockResolvedValue(mockSessions),
   getSessionPid: vi.fn().mockResolvedValue(null),
   createSession: vi.fn().mockResolvedValue('$1'),
@@ -30,7 +30,7 @@ const mockBridge: TmuxBridge = {
     pubsubChannels: [],
     serverMemory: { rss: 100000, heapUsed: 50000, heapTotal: 80000, external: 1000, arrayBuffers: 500 },
   }),
-} as unknown as TmuxBridge
+} as unknown as DirectBridge
 
 // ── Mock memory ──────────────────────────────────────────────────────────────
 

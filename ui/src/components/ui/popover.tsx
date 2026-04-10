@@ -8,7 +8,7 @@ const PopoverTrigger = PopoverPrimitive.Trigger;
 const PopoverContent = React.forwardRef<
   React.ComponentRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = 'center', sideOffset = 6, ...props }, ref) => (
+>(({ className, align = 'center', sideOffset = 6, style, ...props }, ref) => (
   <PopoverPrimitive.Portal>
     <PopoverPrimitive.Content
       ref={ref}
@@ -22,7 +22,7 @@ const PopoverContent = React.forwardRef<
         'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
         className,
       )}
-      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+      style={{ background: 'var(--popover)', borderColor: 'var(--border)', ...style }}
       {...props}
     />
   </PopoverPrimitive.Portal>

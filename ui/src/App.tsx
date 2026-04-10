@@ -1,7 +1,22 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  pointerWithin,
+  rectIntersection,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import useStore, { activeTerminalSend, refreshAllTerminals } from './store';
 import { requestNotificationPermission } from './utils';
-import { useWebSocket } from './hooks/useWebSocket';
+import * as sharedWs from './sharedWs';
 import Sidebar from './components/Sidebar';
 import PaneTerminal, { NOTES_SESSION_ID } from './components/PaneTerminal';
 import MobileKeybar from './components/MobileKeybar';
@@ -10,6 +25,8 @@ import LogsModal from './components/LogsModal';
 import MemoryDialog from './components/MemoryDialog';
 import CommandsDialog, { loadCommands } from './components/CommandsDialog';
 import SessionList from './components/SessionList';
+import { WorkspaceCardPreview, PaneCardPreview } from './components/SessionItem';
+import { DndEnabledContext } from './dndEnabled';
 import { Button } from './components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -62,9 +79,26 @@ export default function App() {
           };
           store.renderSessions([...Object.values(store.sessionMap), optimistic]);
         }
-        // Don't switch to the session if it's a terminal split
-        if (!store.splitSessionIds.has(newId)) {
-          connectSession(newId);
+        // After renderSessions reconciles, look up which workspace contains
+        // this new session. If it's already part of an existing workspace
+        // (because TerminalGrid.ensureCells appended it synchronously as a
+        // split), don't switch to it — the user is mid-split. Otherwise the
+        // reconciler just minted a new single-pane workspace for it, so
+        // jump there.
+        const stateAfter = useStore.getState();
+        let owningWorkspaceId: string | null = null;
+        for (const wsId of stateAfter.workspaceOrder) {
+          const ws = stateAfter.workspaces[wsId];
+          if (ws && ws.cells.includes(newId)) { owningWorkspaceId = wsId; break; }
+        }
+        // Only auto-switch when the owning workspace is a fresh single-pane
+        // workspace (i.e. cell 0 is this new session id) — that's the
+        // "brand-new sidebar row" case. Split-append cases leave focus alone.
+        if (owningWorkspaceId) {
+          const ws = stateAfter.workspaces[owningWorkspaceId];
+          if (ws && ws.cells.length === 1 && ws.cells[0] === newId) {
+            connectSession(owningWorkspaceId);
+          }
         }
         break;
       }
@@ -81,12 +115,14 @@ export default function App() {
     }
   }, [connectSession]);
 
-  const handleOpen = useCallback(() => {
-    sendRef.current({ type: 'list_sessions' });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const send = useCallback((msg: Record<string, unknown>) => sharedWs.send(msg), []);
 
-  const { sendRef } = useWebSocket({ onMessage: handleMessage, onOpen: handleOpen });
-  const send = useCallback((msg: Record<string, unknown>) => sendRef.current(msg), [sendRef]);
+  // Initialize shared WebSocket and subscribe to global messages
+  useEffect(() => {
+    sharedWs.init();
+    const unsub = sharedWs.subscribeGlobal(handleMessage);
+    return () => { unsub(); sharedWs.destroy(); };
+  }, [handleMessage]);
 
   useEffect(() => {
     document.addEventListener('click', requestNotificationPermission, { once: true });
@@ -117,15 +153,24 @@ export default function App() {
       if (!e.metaKey) return;
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
-        const nextId = useStore.getState().navigateSession(e.key === 'ArrowUp' ? 'up' : 'down');
-        if (nextId) connectSession(nextId);
+        const next = useStore.getState().navigateSession(e.key === 'ArrowUp' ? 'up' : 'down');
+        if (next) {
+          connectSession(next.workspaceId);
+          if (next.paneIndex != null) {
+            useStore.getState().setActivePane(next.workspaceId, next.paneIndex);
+          }
+        }
         return;
       }
       if (e.key === 'n') {
         e.preventDefault();
-        const { currentSessionId, sessionMap } = useStore.getState();
-        const path = currentSessionId ? (sessionMap[currentSessionId]?.path ?? null) : null;
-        sendRef.current({ type: 'create_session', path, from_session_id: currentSessionId });
+        // "New session" — inherits the cwd of the currently-active pane inside
+        // the currently-active workspace. Workspaces themselves have no path.
+        const { currentSessionId, sessionMap, workspaces } = useStore.getState();
+        const ws = currentSessionId ? workspaces[currentSessionId] : undefined;
+        const activeSid = ws ? ws.cells[ws.activeCell] ?? ws.cells[0] ?? null : null;
+        const path = activeSid ? sessionMap[activeSid]?.path ?? null : null;
+        sharedWs.send({ type: 'create_session', path, from_session_id: activeSid });
         return;
       }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -133,37 +178,278 @@ export default function App() {
         tabCycleRef.current?.(e.key === 'ArrowRight' ? 'right' : 'left');
         return;
       }
+      // Zoom shortcuts — Cmd +, Cmd -, Cmd 0 (reset). Match both Plus/Equal and numpad.
+      if (e.key === '+' || e.key === '=') {
+        const id = useStore.getState().currentSessionId;
+        if (!id) return;
+        e.preventDefault();
+        useStore.getState().adjustSessionZoom(id, 1);
+        return;
+      }
+      if (e.key === '-' || e.key === '_') {
+        const id = useStore.getState().currentSessionId;
+        if (!id) return;
+        e.preventDefault();
+        useStore.getState().adjustSessionZoom(id, -1);
+        return;
+      }
+      if (e.key === '0') {
+        const id = useStore.getState().currentSessionId;
+        if (!id) return;
+        e.preventDefault();
+        useStore.getState().resetSessionZoom(id);
+        return;
+      }
     };
     window.addEventListener('keydown', down);
     return () => window.removeEventListener('keydown', down);
   }, [connectSession]); // eslint-disable-line
 
+  // ── Global DnD wiring ──────────────────────────────────────────────────
+  // One DndContext spans the whole app so panes can be dragged from
+  // anywhere (sidebar mini-cards or pane headers in the terminal area)
+  // and dropped anywhere (other panes for swap, other workspaces for
+  // merge, sidebar gaps for extract). Workspace reorder lives in the
+  // same context — it just uses dnd-kit's SortableContext (in SessionList).
+  const [activeDrag, setActiveDrag] = useState<{
+    kind: 'workspace'; id: string;
+  } | {
+    kind: 'pane'; sessionId: string; workspaceId: string; paneIdx: number;
+  } | null>(null);
+
+  // Mobile = narrow viewport. All dnd-kit interactivity turns off on mobile
+  // via the DndEnabledContext below — on touch + small screens the drag
+  // affordances are hard to hit and users just want to tap to switch.
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const dndEnabled = !isMobile;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  /** Cursor-driven collision detection.
+   *
+   *  `closestCenter` (the dnd-kit default) measures the distance between the
+   *  active drag's bounding-rect center and each droppable's center, then
+   *  picks the closest. That's a poor fit for our sidebar:
+   *    - Gap drop zones are 56 px tall, sandwiched between full workspace
+   *      cards (100+ px tall). When the cursor is over a gap, the gap's
+   *      center is often *farther* from the active rect's center than the
+   *      neighboring cards' centers, so the gap loses the collision check.
+   *    - Mini PaneCards inside a workspace are tiny; the active rect of a
+   *      pane drag is much larger, so the same problem hits there too.
+   *
+   *  `pointerWithin` instead checks which droppable the *cursor* is inside.
+   *  That matches user intuition: if my cursor is over the gap, drop on the
+   *  gap. We fall back to `rectIntersection` (then `closestCenter`) only
+   *  when no droppable contains the pointer — covers keyboard sensor and
+   *  edge cases where the user is dragging "near" but not "inside" a target.
+   *
+   *  Specificity filter: when the pointer is over a pane card inside a
+   *  workspace row, BOTH the card and the row are returned by pointerWithin
+   *  (the row is the card's parent droppable). dnd-kit picks the first one
+   *  as the "over" target — and if that's the row catch-all instead of the
+   *  card, the card's `useSortable` shift animation never fires. We filter
+   *  out `workspace-row` hits whenever any more-specific droppable is also
+   *  hit, so panes/gaps/terminal-cells always win over the row. */
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const getKind = (id: string | number): string | undefined => {
+      for (const c of args.droppableContainers) {
+        if (c.id === id) {
+          return (c.data?.current as { kind?: string } | undefined)?.kind;
+        }
+      }
+      return undefined;
+    };
+
+    const filterRowsIfSpecific = (collisions: ReturnType<typeof pointerWithin>) => {
+      const specific = collisions.filter(c => getKind(c.id) !== 'workspace-row');
+      return specific.length > 0 ? specific : collisions;
+    };
+
+    const pointerHits = pointerWithin(args);
+    if (pointerHits.length > 0) return filterRowsIfSpecific(pointerHits);
+    const rectHits = rectIntersection(args);
+    if (rectHits.length > 0) return filterRowsIfSpecific(rectHits);
+    return filterRowsIfSpecific(closestCenter(args));
+  }, []);
+
+  const handleDragStart = (e: DragStartEvent) => {
+    const data = e.active.data.current as
+      | { kind: 'workspace' }
+      | { kind: 'pane'; sessionId: string; workspaceId: string; paneIdx: number }
+      | undefined;
+    if (data?.kind === 'workspace') {
+      setActiveDrag({ kind: 'workspace', id: String(e.active.id) });
+    } else if (data?.kind === 'pane') {
+      setActiveDrag({
+        kind: 'pane',
+        sessionId: data.sessionId,
+        workspaceId: data.workspaceId,
+        paneIdx: data.paneIdx,
+      });
+    }
+  };
+
+  const handleDragCancel = () => setActiveDrag(null);
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    setActiveDrag(null);
+    const { active, over } = e;
+    if (!over) return;
+
+    const aData = active.data.current as
+      | { kind: 'workspace' }
+      | { kind: 'pane'; sessionId: string; workspaceId: string; paneIdx: number }
+      | undefined;
+    const oData = over.data.current as
+      | { kind: 'workspace' }
+      | { kind: 'pane'; sessionId: string; workspaceId: string; paneIdx: number }
+      | { kind: 'terminal-cell'; workspaceId: string; paneIdx: number }
+      | { kind: 'workspace-row'; workspaceId: string }
+      | { kind: 'gap'; prevId: string | null; nextId: string | null }
+      | undefined;
+    if (!aData || !oData) return;
+
+    const store = useStore.getState();
+
+    // ── Workspace drag (sortable) ─────────────────────────────────────
+    if (aData.kind === 'workspace') {
+      if (oData.kind !== 'workspace') return;
+      if (active.id === over.id) return;
+      const order = store.workspaceOrder;
+      const fromIdx = order.indexOf(String(active.id));
+      const overIdx = order.indexOf(String(over.id));
+      if (fromIdx < 0 || overIdx < 0) return;
+      const insertAt = fromIdx < overIdx ? overIdx + 1 : overIdx;
+      store.reorderWorkspaces(String(active.id), insertAt);
+      return;
+    }
+
+    // ── Pane drag ─────────────────────────────────────────────────────
+    if (aData.kind !== 'pane') return;
+    const sourceWorkspaceId = aData.workspaceId;
+    const sourceIdx = aData.paneIdx;
+
+    switch (oData.kind) {
+      case 'pane': {
+        // The over target is another PaneCard. Its workspaceId/paneIdx
+        // describe the target pane (NOT the source — both source and target
+        // happen to share the same data shape since useSortable is used
+        // for both directions).
+        const targetWsId = oData.workspaceId;
+        const targetIdx = oData.paneIdx;
+        if (targetWsId === sourceWorkspaceId) {
+          if (targetIdx !== sourceIdx) {
+            // arrayMove semantics — matches the sortable animation that
+            // showed cards sliding out of the way as the user dragged.
+            store.reorderPaneInWorkspace(targetWsId, sourceIdx, targetIdx);
+          }
+        } else {
+          const ok = store.movePaneBetweenWorkspaces({
+            sourceId: sourceWorkspaceId, sourceIdx, targetId: targetWsId,
+          });
+          if (ok) connectSession(targetWsId);
+        }
+        return;
+      }
+      case 'terminal-cell': {
+        const { workspaceId: targetWsId, paneIdx: targetIdx } = oData;
+        // Terminal-area swap is intentionally same-workspace only — the
+        // source workspace would be hidden, so cross-workspace drops there
+        // are confusing. Sidebar mini-cards handle cross-workspace drops.
+        if (targetWsId === sourceWorkspaceId && targetIdx !== sourceIdx) {
+          store.reorderPaneInWorkspace(targetWsId, sourceIdx, targetIdx);
+        }
+        return;
+      }
+      case 'workspace-row': {
+        const { workspaceId: targetWsId } = oData;
+        if (targetWsId === sourceWorkspaceId) return;
+        const ok = store.movePaneBetweenWorkspaces({
+          sourceId: sourceWorkspaceId, sourceIdx, targetId: targetWsId,
+        });
+        if (ok) connectSession(targetWsId);
+        return;
+      }
+      case 'gap': {
+        const { prevId, nextId } = oData;
+        const order = useStore.getState().workspaceOrder;
+        let insertAt = order.length;
+        if (nextId) {
+          const i = order.indexOf(nextId);
+          if (i >= 0) insertAt = i;
+        } else if (prevId) {
+          const i = order.indexOf(prevId);
+          if (i >= 0) insertAt = i + 1;
+        }
+        const newId = store.extractPaneToNewWorkspace({
+          sourceId: sourceWorkspaceId, sourceIdx, insertAt,
+        });
+        if (newId) connectSession(newId);
+        return;
+      }
+    }
+  };
+
+  // Resolve the dragged workspace / pane for the DragOverlay preview.
+  const draggedWorkspace = activeDrag?.kind === 'workspace'
+    ? useStore.getState().workspaces[activeDrag.id]
+    : null;
+  const draggedPaneSession = activeDrag?.kind === 'pane'
+    ? useStore.getState().sessionMap[activeDrag.sessionId]
+    : null;
+
   return (
-    <div
-      className="flex overflow-hidden"
-      style={{
-        height: 'var(--vvh, 100dvh)', transition: 'height 0.25s ease',
-        background: '#0c0c0c', color: '#d4d4d8',
-        fontFamily: "'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13,
-      }}
+    <DndEnabledContext.Provider value={dndEnabled}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
-      <Sidebar onConnect={connectSession} send={send} />
+      <div
+        className="flex overflow-hidden"
+        style={{
+          height: 'var(--vvh, 100dvh)', transition: 'height 0.25s ease',
+          background: '#0c0c0c', color: '#d4d4d8',
+          fontFamily: "'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize: 13,
+        }}
+      >
+        <Sidebar onConnect={connectSession} send={send} />
 
-      <div className="flex flex-col flex-1 min-w-0">
-        <MobileTopBar onConnect={connectSession} send={send} />
+        <div className="flex flex-col flex-1 min-w-0">
+          <MobileTopBar onConnect={connectSession} send={send} />
 
-        <PaneTerminal
-          sessionId={currentSessionId}
-          send={send}
-          onTabReady={(fn) => { tabCycleRef.current = fn; }}
-          onConnect={connectSession}
-        />
+          <PaneTerminal
+            sessionId={currentSessionId}
+            send={send}
+            onTabReady={(fn) => { tabCycleRef.current = fn; }}
+          />
 
-        <MobileKeybar sendRef={sendRef} termRef={{ current: null }} />
+          <MobileKeybar sendRef={{ current: sharedWs.send }} termRef={{ current: null }} />
+        </div>
+
+        <ConfirmDialog />
       </div>
 
-      <ConfirmDialog />
-    </div>
+      {/* DragOverlay floats with the cursor for both workspace and pane
+          drags. Static, non-interactive previews so dnd-kit doesn't try to
+          re-register the same id while a drag is active. */}
+      <DragOverlay dropAnimation={{ duration: 180, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+        {draggedWorkspace ? <WorkspaceCardPreview workspace={draggedWorkspace} /> : null}
+        {draggedPaneSession ? <PaneCardPreview session={draggedPaneSession} /> : null}
+      </DragOverlay>
+    </DndContext>
+    </DndEnabledContext.Provider>
   );
 }
 
@@ -193,8 +479,13 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
     const dy = e.changedTouches[0]!.clientY - swipeTouchRef.current.y;
     swipeTouchRef.current = null;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const nextId = useStore.getState().navigateSession(dx < 0 ? 'down' : 'up');
-    if (nextId) onConnect(nextId);
+    const next = useStore.getState().navigateSession(dx < 0 ? 'down' : 'up');
+    if (next) {
+      onConnect(next.workspaceId);
+      if (next.paneIndex != null) {
+        useStore.getState().setActivePane(next.workspaceId, next.paneIndex);
+      }
+    }
   }, [onConnect]);
 
   const [showSessions, setShowSessions] = useState(false);
@@ -382,7 +673,7 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" className="w-48">
               <DropdownMenuLabel className="flex justify-between items-center text-xs">
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ViperIcon size={13} color="var(--primary)" /> vipershell</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ViperIcon size={13} color="var(--primary)" /> <span className="brand-gradient-text">vipershell</span></span>
                 <span className="font-mono text-primary">v{version ?? '\u2026'}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -402,7 +693,7 @@ function MobileTopBar({ onConnect, send }: MobileTopBarProps) {
               ? sessionOrder.map((id, i) => (
                   <span key={id} style={{
                     width: i === sessionIdx ? 16 : 5, height: 5, borderRadius: 3,
-                    background: i === sessionIdx ? 'var(--primary)' : 'var(--border)',
+                    background: i === sessionIdx ? 'var(--primary-gradient)' : 'var(--border)',
                     transition: 'width 0.25s ease, background 0.25s ease', flexShrink: 0,
                   }} />
                 ))

@@ -1,0 +1,160 @@
+/* MDXEditor dark theme overrides — imported AFTER @mdxeditor/editor/style.css
+   so these rules win by source order at equal specificity. */
+
+.notes-editor-wrapper .mdxeditor,
+.notes-editor-wrapper .mdxeditor * {
+  --slate-1: #111113;
+  --slate-2: #18191b;
+  --slate-3: #212225;
+  --slate-4: #272a2d;
+  --slate-5: #2e3135;
+  --slate-6: #363a3f;
+  --slate-7: #43484e;
+  --slate-8: #5a6169;
+  --slate-9: #696e77;
+  --slate-10: #777b84;
+  --slate-11: #b0b4ba;
+  --slate-12: #edeef0;
+  --blue-1: #0d1520;
+  --blue-2: #111927;
+  --blue-3: #0d2847;
+  --blue-4: #003362;
+  --blue-5: #004074;
+  --blue-6: #104d87;
+  --blue-7: #205d9e;
+  --blue-8: #2870bd;
+  --blue-9: #0090ff;
+  --blue-10: #3b9eff;
+  --blue-11: #70b8ff;
+  --blue-12: #c2e6ff;
+  --basePageBg: #0c0c0c;
+  --baseBgSubtle: #111111;
+  --baseBg: var(--slate-3);
+  --baseBgHover: var(--slate-4);
+  --baseBgActive: var(--slate-5);
+  --baseLine: #222222;
+  --baseBorder: var(--slate-6);
+  --baseText: var(--slate-11);
+  --baseTextContrast: var(--slate-12);
+  --accentSolid: #0074d9;
+  --accentText: #0074d9;
+}
+
+.notes-editor-wrapper .mdxeditor {
+  font-family: 'JetBrains Mono', monospace;
+  background: #0c0c0c;
+  color: var(--slate-11);
+}
+
+/* Force toolbar icon/text visibility */
+._toolbarRoot_1e2ox_162 {
+  background: #1a1a1a;
+}
+
+._toolbarRoot_1e2ox_162 svg {
+  color: #edeef0;
+}
+
+._selectTrigger_1e2ox_308 {
+  color: #edeef0;
+}
+
+._selectTrigger_1e2ox_308 span:first-child {
+  color: #b0b4ba;
+}
+
+._toolbarToggleItem_1e2ox_208,
+._toolbarButton_1e2ox_239 {
+  color: #edeef0;
+}
+
+._toolbarToggleItem_1e2ox_208:hover,
+._toolbarButton_1e2ox_239:hover {
+  background-color: var(--slate-4);
+}
+
+._toolbarToggleItem_1e2ox_208[data-state='on'],
+._toolbarButton_1e2ox_239[data-state='on'] {
+  background-color: var(--slate-5);
+}
+
+/* Editor content area */
+.notes-editable {
+  padding: 16px 20px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+  color: #d4d4d8 !important;
+  min-height: 100% !important;
+  caret-color: #0074d9 !important;
+  outline: none !important;
+}
+
+.notes-editable h1, .notes-editable h2, .notes-editable h3,
+.notes-editable h4, .notes-editable h5, .notes-editable h6 {
+  color: #F4F4F5 !important;
+  margin: 0.8em 0 0.4em !important;
+}
+.notes-editable h1 { font-size: 1.8em !important; border-bottom: 1px solid #222; padding-bottom: 0.2em; }
+.notes-editable h2 { font-size: 1.4em !important; border-bottom: 1px solid #222; padding-bottom: 0.2em; }
+.notes-editable a { color: #0074d9 !important; }
+.notes-editable code {
+  background: #1a1a1a !important;
+  color: #009296 !important;
+  padding: 1px 5px !important;
+  border-radius: 3px !important;
+  font-size: 0.9em !important;
+}
+.notes-editable pre {
+  background: #111111 !important;
+  border: 1px solid #222 !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+}
+.notes-editable pre code { background: none !important; color: #d4d4d8 !important; padding: 0 !important; }
+.notes-editable blockquote {
+  border-left: 3px solid #0074d9 !important;
+  padding-left: 1em !important;
+  color: #a1a1aa !important;
+}
+.notes-editable table { border-collapse: collapse !important; width: 100% !important; }
+.notes-editable th, .notes-editable td { border: 1px solid #222 !important; padding: 6px 12px !important; }
+.notes-editable th { background: #111 !important; color: #F4F4F5 !important; }
+.notes-editable hr { border: none !important; border-top: 1px solid #222 !important; margin: 1.2em 0 !important; }
+
+/* Select dropdown (renders in portal outside wrapper) */
+._toolbarButtonDropdownContainer_1e2ox_286,
+._selectContainer_1e2ox_288 {
+  background-color: #111 !important;
+  border: 1px solid #333 !important;
+}
+
+._selectItem_1e2ox_301,
+._toolbarNodeKindSelectItem_1e2ox_348 {
+  color: #b0b4ba !important;
+}
+
+._selectItem_1e2ox_301[data-highlighted],
+._toolbarNodeKindSelectItem_1e2ox_348[data-highlighted] {
+  background-color: #222 !important;
+  color: #edeef0 !important;
+}
+
+._selectItem_1e2ox_301[data-state='checked'],
+._toolbarNodeKindSelectItem_1e2ox_348[data-state='checked'] {
+  color: #0074d9 !important;
+}
+
+/* Dialog/popover overrides (also portaled) */
+[class*="_dialogContent_"],
+[class*="_popoverContent_"] {
+  background: #111 !important;
+  border: 1px solid #222 !important;
+  color: #d4d4d8 !important;
+}
+[class*="_dialogContent_"] input,
+[class*="_popoverContent_"] input {
+  background: #0c0c0c !important;
+  border: 1px solid #333 !important;
+  color: #d4d4d8 !important;
+}

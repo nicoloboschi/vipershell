@@ -13,6 +13,51 @@ const PROFILE = 'vipershell';
 const LOG_PATH = join(homedir(), '.hindsight', 'profiles', `${PROFILE}.log`);
 const DEFAULT_EMBEDDED_URL = 'http://127.0.0.1:9027';
 const HEALTH_TIMEOUT_MS = 90_000;
+
+// ── Memory activity tracking ────────────────────────────────────────────────
+
+/** Maximum bytes of payload/results we retain per activity entry. */
+export const MAX_ACTIVITY_PAYLOAD_BYTES = 8 * 1024;
+
+export interface MemoryActivity {
+  ts: number;            // Date.now()
+  type: 'retain' | 'recall';
+  source: 'vipershell' | 'claude-code' | 'codex' | 'hermes' | 'plugin';
+  sessionId?: string;
+  contentSize?: number;  // bytes for retain (full size, even if payload was truncated)
+  resultCount?: number;  // number of results for recall
+  context?: string;      // short summary line (≤120 chars) — kept for compact UI
+  /** The endpoint subpath the call hit — e.g. "v1/default/banks/vipershell/memories". */
+  subpath?: string;
+  /** Full ingested content (retain) or full query (recall), capped at MAX_ACTIVITY_PAYLOAD_BYTES. */
+  payload?: string;
+  /** True if the payload was truncated to fit the byte cap. */
+  payloadTruncated?: boolean;
+  /** Metadata/tags carried with the call (session_id, tool, hook_event, etc). */
+  metadata?: Record<string, string>;
+  /** For recall: preview of the joined result texts returned to the hook (capped). */
+  resultsPreview?: string;
+  /** True if resultsPreview was truncated. */
+  resultsPreviewTruncated?: boolean;
+}
+
+const MAX_ACTIVITY = 100;
+const _activityLog: MemoryActivity[] = [];
+
+/** Truncate `s` to at most `max` bytes (UTF-8 safe via slice on chars — close enough for caps). */
+export function capPayload(s: string, max = MAX_ACTIVITY_PAYLOAD_BYTES): { value: string; truncated: boolean } {
+  if (s.length <= max) return { value: s, truncated: false };
+  return { value: s.slice(0, max), truncated: true };
+}
+
+export function logMemoryActivity(entry: MemoryActivity): void {
+  _activityLog.push(entry);
+  if (_activityLog.length > MAX_ACTIVITY) _activityLog.shift();
+}
+
+export function getMemoryActivity(): MemoryActivity[] {
+  return [..._activityLog];
+}
 const HEALTH_POLL_MS = 500;
 const KEEPALIVE_INTERVAL_MS = 15_000;
 const CONFIG_PATH = join(homedir(), '.config', 'vipershell', 'config.json');
@@ -364,15 +409,27 @@ export class MemoryStore {
 
   async retain(content: string, _documentId: string, tags: string[], context: string): Promise<void> {
     if (!this.client) return;
+    const sessionTag = tags.find(t => t.startsWith('session:'));
+    const sessionId = sessionTag?.split(':')[1];
+    const metadata = Object.fromEntries(tags.map(t => {
+      const [k, ...v] = t.split(':');
+      return [k, v.join(':')];
+    }));
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (this.client as any).retain(BANK_ID, content, {
         context,
-        metadata: Object.fromEntries(tags.map(t => {
-          const [k, ...v] = t.split(':');
-          return [k, v.join(':')];
-        })),
+        metadata,
         async: true,
+      });
+      const capped = capPayload(content);
+      logMemoryActivity({
+        ts: Date.now(), type: 'retain', source: 'vipershell',
+        sessionId, contentSize: content.length, context,
+        subpath: `v1/default/banks/${BANK_ID}/memories`,
+        payload: capped.value,
+        payloadTruncated: capped.truncated,
+        metadata,
       });
     } catch (e) {
       logger.warn(`Hindsight retain failed: ${e}`);
@@ -385,7 +442,19 @@ export class MemoryStore {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const resp = await (this.client as any).recall(BANK_ID, query, { budget: 'low' });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (resp.results ?? []).map((r: any) => r.text as string);
+      const results = (resp.results ?? []).map((r: any) => r.text as string);
+      const cappedQuery = capPayload(query);
+      const cappedResults = capPayload(results.join('\n---\n'));
+      logMemoryActivity({
+        ts: Date.now(), type: 'recall', source: 'vipershell',
+        resultCount: results.length, context: query.slice(0, 100),
+        subpath: `v1/default/banks/${BANK_ID}/recall`,
+        payload: cappedQuery.value,
+        payloadTruncated: cappedQuery.truncated,
+        resultsPreview: cappedResults.value,
+        resultsPreviewTruncated: cappedResults.truncated,
+      });
+      return results;
     } catch {
       return [];
     }

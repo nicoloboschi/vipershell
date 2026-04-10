@@ -5,8 +5,8 @@ import { DialogHeader, DialogTitle } from './ui/dialog';
 import ConfigDialog from './ConfigDialog';
 
 const TERMINAL_THEME = {
-  background: '#0c0c0c', foreground: '#d4d4d8', cursor: '#4ADE80', cursorAccent: '#0c0c0c',
-  selectionBackground: 'rgba(74,222,128,0.25)',
+  background: '#0c0c0c', foreground: '#d4d4d8', cursor: '#0074d9', cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(0,116,217,0.25)',
   black: '#3B3B3B', brightBlack: '#525252', red: '#F87171', brightRed: '#FCA5A5',
   green: '#4ADE80', brightGreen: '#86EFAC', yellow: '#FACC15', brightYellow: '#FDE68A',
   blue: '#60A5FA', brightBlue: '#93C5FD', magenta: '#C084FC', brightMagenta: '#D8B4FE',

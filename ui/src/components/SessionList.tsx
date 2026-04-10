@@ -1,42 +1,15 @@
-import { useState, useRef, useCallback } from 'react';
-import { StickyNote } from 'lucide-react';
-import useStore, { type Session } from '../store';
-import SessionGroup from './SessionGroup';
+import { useState } from 'react';
+import { StickyNote, SquarePlus } from 'lucide-react';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { useDroppable, useDndMonitor } from '@dnd-kit/core';
+import useStore, { type Workspace } from '../store';
+import SessionItem, { loadFavourites, toggleFavourite } from './SessionItem';
 import { ScrollArea } from './ui/scroll-area';
 import { NOTES_SESSION_ID } from './PaneTerminal';
-
-interface Workspace {
-  key: string;
-  name: string;
-  sessions: Session[];
-}
-
-function basename(p: string): string {
-  const parts = p.replace(/\/+$/, '').split('/');
-  return parts[parts.length - 1] || p;
-}
-
-const STORAGE_KEY = 'vipershell:workspace-order';
-
-function loadOrder(): string[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function saveOrder(order: string[]) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(order)); } catch { /* quota */ }
-}
-
-function sortWorkspaces(workspaces: Workspace[], storedOrder: string[]): Workspace[] {
-  if (storedOrder.length === 0) return workspaces;
-  const orderMap = new Map(storedOrder.map((key, i) => [key, i]));
-  return [...workspaces].sort((a, b) => {
-    const ai = orderMap.get(a.key) ?? Infinity;
-    const bi = orderMap.get(b.key) ?? Infinity;
-    if (ai === bi) return 0; // both unknown — keep natural order
-    return ai - bi;
-  });
-}
+import { useDndEnabled } from '../dndEnabled';
 
 interface SessionListProps {
   onConnect: (id: string) => void;
@@ -44,82 +17,121 @@ interface SessionListProps {
   id?: string;
 }
 
+/** Drop zone that sits in the gap between workspace rows (and at the start
+ *  and end of each section). Registered as a dnd-kit droppable so it
+ *  receives pane drags. Dropping a pane here extracts it into a brand-new
+ *  workspace at this position; App.tsx's onDragEnd handles the action.
+ *
+ *  Idle: invisible. Pane drag in flight: faint dashed line. Hovered while
+ *  the active drag is over this gap: solid blue glow line + a "Drop to
+ *  extract" hint. */
+function GapDropZone({
+  prevId, nextId, anyPaneDragActive,
+}: {
+  prevId: string | null;
+  nextId: string | null;
+  anyPaneDragActive: boolean;
+}): React.ReactElement {
+  const dropId = `gap:${prevId ?? 'start'}->${nextId ?? 'end'}`;
+  const { setNodeRef, isOver } = useDroppable({
+    id: dropId,
+    data: { kind: 'gap', prevId, nextId },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={[
+        'gap-drop-zone',
+        anyPaneDragActive ? 'gap-drop-zone-armed' : '',
+        isOver ? 'gap-drop-zone-hover' : '',
+      ].filter(Boolean).join(' ')}
+      data-prev={prevId ?? ''}
+      data-next={nextId ?? ''}
+    >
+      <div className="gap-drop-zone-line" />
+      {anyPaneDragActive && (
+        <div className="gap-drop-zone-label">
+          <SquarePlus size={14} />
+          <span>Drop to create a new workspace</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SessionList({ onConnect, send, id }: SessionListProps) {
-  const allSessions = useStore(s => s.sessions);
-  const splitIds = useStore(s => s.splitSessionIds);
-  const sessions = allSessions.filter(s => !splitIds.has(s.id));
+  const workspaces = useStore(s => s.workspaces);
+  const workspaceOrder = useStore(s => s.workspaceOrder);
   const currentSessionId = useStore(s => s.currentSessionId);
+  const [favourites, setFavourites] = useState(loadFavourites);
+  const dndEnabled = useDndEnabled();
 
-  const [order, setOrder] = useState(loadOrder);
-  const draggedRef = useRef<string | null>(null);
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  // Track whether a *pane* drag is currently in flight in the global
+  // DndContext so the gap zones can light up only when relevant. We use
+  // dnd-kit's useDndMonitor — it works because SessionList renders inside
+  // App.tsx's DndContext.
+  const [anyPaneDragActive, setAnyPaneDragActive] = useState(false);
+  useDndMonitor({
+    onDragStart(e) {
+      const data = e.active.data.current as { kind?: string } | undefined;
+      if (data?.kind === 'pane') setAnyPaneDragActive(true);
+    },
+    onDragEnd() { setAnyPaneDragActive(false); },
+    onDragCancel() { setAnyPaneDragActive(false); },
+  });
 
-  if (!sessions.length) {
+  // Resolve workspaces in the order the store reports, skipping any that
+  // might have been deleted mid-render.
+  const allWs: Workspace[] = workspaceOrder
+    .map(id => workspaces[id])
+    .filter((w): w is Workspace => !!w);
+
+  if (allWs.length === 0) {
     return (
       <ScrollArea id={id} className="session-list flex-1 py-2">
-        <div className="empty-state">No sessions found</div>
+        <div
+          onClick={() => onConnect(NOTES_SESSION_ID)}
+          data-session-id={NOTES_SESSION_ID}
+          className={`session-item${currentSessionId === NOTES_SESSION_ID ? ' active' : ''}`}
+        >
+          <span className="session-icon" style={{ opacity: currentSessionId === NOTES_SESSION_ID ? 0.7 : 0.4 }}>
+            <StickyNote size={12} />
+          </span>
+          <span className="session-name-inline">Notes</span>
+        </div>
+        <div className="empty-state">No workspaces yet</div>
       </ScrollArea>
     );
   }
 
-  // Group sessions into workspaces
-  const workspaceMap = new Map<string, Session[]>();
-  for (const s of sessions) {
-    const key = s.gitRoot ?? s.path ?? '';
-    if (!workspaceMap.has(key)) workspaceMap.set(key, []);
-    workspaceMap.get(key)!.push(s);
-  }
-
-  const rawWorkspaces: Workspace[] = Array.from(workspaceMap.entries()).map(([key, ss]) => ({
-    key,
-    name: key ? basename(key) : 'Home',
-    sessions: ss,
-  }));
-
-  const workspaces = sortWorkspaces(rawWorkspaces, order);
-
-  // Drag handlers
-  const handleDragStart = (key: string) => {
-    draggedRef.current = key;
-  };
-
-  const handleDragOver = (e: React.DragEvent, key: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (draggedRef.current && draggedRef.current !== key) {
-      setDragOverKey(key);
-    }
-  };
-
-  const handleDragLeave = () => {
-    setDragOverKey(null);
-  };
-
-  const handleDrop = (targetKey: string) => {
-    const sourceKey = draggedRef.current;
-    setDragOverKey(null);
-    draggedRef.current = null;
-    if (!sourceKey || sourceKey === targetKey) return;
-
-    // Build new order from current visual order
-    const currentKeys = workspaces.map(w => w.key);
-    const fromIdx = currentKeys.indexOf(sourceKey);
-    const toIdx = currentKeys.indexOf(targetKey);
-    if (fromIdx === -1 || toIdx === -1) return;
-
-    currentKeys.splice(fromIdx, 1);
-    currentKeys.splice(toIdx, 0, sourceKey);
-
-    setOrder(currentKeys);
-    saveOrder(currentKeys);
-  };
-
-  const handleDragEnd = () => {
-    draggedRef.current = null;
-    setDragOverKey(null);
-  };
-
+  const favWs = allWs.filter(w => favourites.has(w.id));
+  const otherWs = allWs.filter(w => !favourites.has(w.id));
   const isNotesActive = currentSessionId === NOTES_SESSION_ID;
+
+  // Single sortable context spans BOTH sections. Items are addressed by
+  // workspace.id; the visual section split is purely cosmetic.
+  const sortableIds = allWs.map(w => w.id);
+
+  /** Render a section of workspace rows. No more per-row gap drop zones —
+   *  there's a single "create new workspace" zone at the bottom of the
+   *  whole list (rendered outside this helper). */
+  const renderSection = (section: Workspace[], isFav: boolean): React.ReactElement[] =>
+    section.map(ws => (
+      <SessionItem
+        key={ws.id}
+        workspace={ws}
+        isActive={currentSessionId === ws.id}
+        onConnect={onConnect}
+        send={send}
+        isFavourite={isFav}
+        onToggleFavourite={() => setFavourites(toggleFavourite(ws.id))}
+      />
+    ));
+
+  // The id of the very last workspace in the list — used as `prevId` for
+  // the single trailing gap drop zone, so dropping a pane there extracts
+  // it into a new workspace appended at the end of workspaceOrder.
+  const lastWsId = allWs[allWs.length - 1]?.id ?? null;
 
   return (
     <ScrollArea id={id} className="session-list flex-1 py-2">
@@ -134,25 +146,33 @@ export default function SessionList({ onConnect, send, id }: SessionListProps) {
         <span className="session-name-inline">Notes</span>
       </div>
 
-      <div className="session-section-label" style={{ marginTop: 10 }}>Workspaces</div>
+      <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+        {favWs.length > 0 && (
+          <>
+            <div className="session-section-label" style={{ marginTop: 10 }}>Favourites</div>
+            {renderSection(favWs, true)}
+          </>
+        )}
 
-      {workspaces.map(({ key, name, sessions: ss }) => (
-        <SessionGroup
-          key={key}
-          name={name}
-          path={ss[0]?.path ?? null}
-          sessions={ss}
-          onConnect={onConnect}
-          send={send}
-          workspaceKey={key}
-          isDragOver={dragOverKey === key}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onDragEnd={handleDragEnd}
+        {otherWs.length > 0 && (
+          <>
+            <div className="session-section-label" style={{ marginTop: 10 }}>Workspaces</div>
+            {renderSection(otherWs, false)}
+          </>
+        )}
+      </SortableContext>
+
+      {/* The single "create new workspace" drop target. Drops a pane here →
+          extract to a new workspace appended at the end of workspaceOrder.
+          Lights up only when a pane drag is in flight. Hidden on mobile
+          (no drag there). */}
+      {dndEnabled && (
+        <GapDropZone
+          prevId={lastWsId}
+          nextId={null}
+          anyPaneDragActive={anyPaneDragActive}
         />
-      ))}
+      )}
     </ScrollArea>
   );
 }

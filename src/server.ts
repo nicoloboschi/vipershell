@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { TmuxBridge } from './bridge.js';
+import { DirectBridge } from './direct-bridge.js';
 import { createApiRouter } from './api.js';
 import type { BridgeMessage } from './bridge.js';
 import type { MemoryStore } from './memory.js';
@@ -60,69 +60,16 @@ export const logger = {
 // ── WebSocket client state ────────────────────────────────────────────────────
 
 interface ClientState {
-  sessionId: string | null;
-  unsubOutput: (() => void) | null;
+  /** Per-session output subscriptions (session_id → unsubscribe fn) */
+  subscribedSessions: Map<string, () => void>;
+  /** Global session-list subscription unsub */
   unsubSessions: (() => void) | null;
 }
 
-// ── Session connect logic (extracted for testability) ─────────────────────
-
-export interface ConnectDeps {
-  pubsub: TmuxBridge['pubsub'];
-  snapshot: (sessionId: string) => Promise<string>;
-  connectSession: (sessionId: string) => Promise<boolean>;
-  send: (msg: BridgeMessage | object) => void;
-}
-
-/**
- * Handles the 'connect' flow: subscribes to live output, takes a snapshot,
- * connects the PTY, and sends everything to the client in the right order.
- * Returns the unsubscribe function for the pubsub subscription.
- */
-export async function handleSessionConnect(
-  sessionId: string,
-  deps: ConnectDeps,
-): Promise<() => void> {
-  // 1. Subscribe to pubsub FIRST so we never miss output during
-  //    the async snapshot/connect calls below.
-  const pending: string[] = [];
-  let draining = false;
-  const unsub = deps.pubsub.subscribe(sessionId, (m: BridgeMessage) => {
-    if (m.type !== 'output') return;
-    if (draining) { deps.send(m); } else { pending.push(m.data); }
-  });
-
-  // 2. Take snapshot — the authoritative screen state. Any output
-  //    that arrives during this async call is safely buffered above.
-  const snap = await deps.snapshot(sessionId);
-
-  // 3. Ensure PTY is running. If newly created, tmux attach
-  //    dumps the visible screen which duplicates the snapshot —
-  //    discard the pending buffer in that case.
-  const isNew = await deps.connectSession(sessionId);
-
-  // 4. Send snapshot to client.
-  deps.send({ type: 'connected' });
-  deps.send({ type: 'output', data: snap });
-
-  // 5. Flush buffered live output. If PTY was freshly attached,
-  //    the pending data is just the initial screen dump (already
-  //    covered by the snapshot) — skip it to avoid duplicates.
-  if (isNew) {
-    await new Promise(r => setTimeout(r, 20));
-    pending.length = 0;
-  }
-  draining = true;
-  for (const data of pending) {
-    deps.send({ type: 'output', data });
-  }
-
-  return unsub;
-}
 
 // ── Server factory ────────────────────────────────────────────────────────────
 
-export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIService) {
+export async function createApp(bridge: DirectBridge, memory: MemoryStore, ai: AIService) {
   const app = express();
   app.use(express.json());
 
@@ -140,20 +87,42 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
 
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws: WebSocket) => {
-    const state: ClientState = { sessionId: null, unsubOutput: null, unsubSessions: null };
-    logger.debug('WS client connected');
+  // Track active WebSocket clients for diagnostics
+  const activeClients = new Set<{ ws: WebSocket; state: ClientState; connectedAt: number; messageCount: number; bytesSent: number }>();
 
-    // Subscribe to session list updates
+  // Expose WS diagnostics via the bridge (so /api/diagnostics can include it)
+  (bridge as any)._wsClientsDiag = () => {
+    const clients: { subscribedSessions: string[]; connectedAt: number; messageCount: number; bytesSent: number }[] = [];
+    for (const c of activeClients) {
+      clients.push({
+        subscribedSessions: [...c.state.subscribedSessions.keys()],
+        connectedAt: c.connectedAt,
+        messageCount: c.messageCount,
+        bytesSent: c.bytesSent,
+      });
+    }
+    return { totalConnections: activeClients.size, clients };
+  };
+
+  wss.on('connection', (ws: WebSocket) => {
+    const state: ClientState = { subscribedSessions: new Map(), unsubSessions: null };
+    const clientInfo = { ws, state, connectedAt: Date.now(), messageCount: 0, bytesSent: 0 };
+    activeClients.add(clientInfo);
+    logger.debug(`WS client connected (total: ${activeClients.size})`);
+
+    // Subscribe to session list updates (once per client)
     state.unsubSessions = bridge.pubsub.subscribe('__sessions__', (msg) => {
-      if (msg.type === 'sessions' || msg.type === 'last_command' || msg.type === 'current_input' || (msg.type === 'preview' && state.sessionId !== null)) {
+      if (msg.type === 'sessions' || msg.type === 'last_command' || msg.type === 'current_input' || msg.type === 'preview') {
         send(msg);
       }
     });
 
     function send(msg: BridgeMessage | object): void {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg));
+        const data = JSON.stringify(msg);
+        clientInfo.messageCount++;
+        clientInfo.bytesSent += data.length;
+        ws.send(data);
       }
     }
 
@@ -170,43 +139,63 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
             break;
           }
 
+          case 'subscribe':
           case 'connect': {
             const sessionId = msg.session_id as string;
-            state.unsubOutput?.();
-            state.sessionId = sessionId;
-            state.unsubOutput = await handleSessionConnect(sessionId, {
-              pubsub: bridge.pubsub,
-              snapshot: (id) => bridge.snapshot(id),
-              connectSession: (id) => bridge.connectSession(id),
-              send,
-            });
+            state.subscribedSessions.get(sessionId)?.();
+            state.subscribedSessions.delete(sessionId);
+
+            // Atomic subscribe — ring buffer read + pubsub subscribe
+            // in the same tick. Zero lost or duplicated output by design.
+            const unsub = bridge.subscribeSession(
+              sessionId,
+              () => send({ type: 'connected', session_id: sessionId }),
+              (data) => send({ type: 'output', session_id: sessionId, data }),
+              msg.cols as number | undefined,
+              msg.rows as number | undefined,
+            );
+            if (unsub) state.subscribedSessions.set(sessionId, unsub);
+            break;
+          }
+
+          case 'unsubscribe': {
+            const sessionId = msg.session_id as string;
+            state.subscribedSessions.get(sessionId)?.();
+            state.subscribedSessions.delete(sessionId);
             break;
           }
 
           case 'create_session': {
-            const path = msg.path as string | undefined;
+            let path = msg.path as string | undefined;
             const initCommand = msg.init_command as string | undefined;
-            // Send optimistic response immediately so UI can update fast
-            const sessionId = await bridge.createSession(path);
-            send({ type: 'session_created', session_id: sessionId, path: path || null });
-            // Send initial command to the new session's tmux pane
-            if (initCommand) {
-              bridge.sendKeys(sessionId, initCommand);
+            if (path === '__vibe__') {
+              const { mkdirSync } = await import('fs');
+              const { join } = await import('path');
+              const { homedir } = await import('os');
+              const adjectives = ['cosmic', 'neon', 'quantum', 'cyber', 'stellar', 'lunar', 'solar', 'atomic', 'hyper', 'turbo', 'ultra', 'mega', 'super', 'blazing', 'radiant', 'vivid', 'primal', 'astral', 'mystic', 'pixel'];
+              const nouns = ['phoenix', 'nebula', 'vortex', 'spark', 'pulse', 'nova', 'flux', 'drift', 'surge', 'wave', 'storm', 'forge', 'core', 'orbit', 'prism', 'cipher', 'vertex', 'synth', 'echo', 'glyph'];
+              const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]!;
+              const name = `${pick(adjectives)}-${pick(nouns)}`;
+              const vibeDir = join(homedir(), '.vipershell', 'vibe-sessions', name);
+              mkdirSync(vibeDir, { recursive: true });
+              path = vibeDir;
             }
-            // Then refresh full session list in background
-            bridge.listSessions().then(sessions => {
-              send({ type: 'sessions', sessions });
-            });
+            const cols = msg.cols as number | undefined;
+            const rows = msg.rows as number | undefined;
+            const sessionId = await bridge.createSession(path, cols, rows);
+            send({ type: 'session_created', session_id: sessionId, path: path || null });
+            if (initCommand) {
+              await bridge.sendKeys(sessionId, initCommand);
+            }
+            const sessions = await bridge.listSessions();
+            send({ type: 'sessions', sessions });
             break;
           }
 
           case 'close_session': {
             const sessionId = msg.session_id as string;
-            if (state.sessionId === sessionId) {
-              state.unsubOutput?.();
-              state.unsubOutput = null;
-              state.sessionId = null;
-            }
+            state.subscribedSessions.get(sessionId)?.();
+            state.subscribedSessions.delete(sessionId);
             await bridge.closeSession(sessionId);
             const sessions = await bridge.listSessions();
             send({ type: 'sessions', sessions });
@@ -214,14 +203,14 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
           }
 
           case 'input': {
-            if (state.sessionId) bridge.sendInput(state.sessionId, msg.data as string);
+            const sessionId = msg.session_id as string;
+            if (sessionId) bridge.sendInput(sessionId, msg.data as string);
             break;
           }
 
           case 'resize': {
-            if (state.sessionId) {
-              bridge.resize(state.sessionId, msg.cols as number, msg.rows as number);
-            }
+            const sessionId = msg.session_id as string;
+            if (sessionId) bridge.resize(sessionId, msg.cols as number, msg.rows as number);
             break;
           }
 
@@ -232,9 +221,11 @@ export async function createApp(bridge: TmuxBridge, memory: MemoryStore, ai: AIS
     });
 
     ws.on('close', () => {
-      state.unsubOutput?.();
+      for (const unsub of state.subscribedSessions.values()) unsub();
+      state.subscribedSessions.clear();
       state.unsubSessions?.();
-      logger.debug('WS client disconnected');
+      activeClients.delete(clientInfo);
+      logger.debug(`WS client disconnected (total: ${activeClients.size})`);
     });
   });
 

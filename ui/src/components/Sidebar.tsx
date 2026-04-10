@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, Zap, TerminalSquare, SquarePlus } from 'lucide-react';
+import { Settings, Zap, TerminalSquare, SquarePlus, PanelLeftClose } from 'lucide-react';
+import MemoryIndicator from './MemoryIndicator';
 import useStore, { activeTerminalSend } from '../store';
 import SessionList from './SessionList';
 import { loadCommands } from './CommandsDialog';
@@ -27,6 +28,9 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [claudeCommand, setClaudeCommand] = useState('claude');
   const [version, setVersion] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('vipershell:sidebar-collapsed') === '1'; } catch { return false; }
+  });
   const [sidebarW, setSidebarW] = useState(() => {
     try { return parseInt(localStorage.getItem('vipershell:sidebar-w') ?? '') || 256; } catch { return 256; }
   });
@@ -38,7 +42,7 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
     const startX = e.clientX;
     const startW = sidebarW;
     const handle = e.currentTarget as HTMLElement;
-    handle.style.background = '#4ADE80';
+    handle.style.background = '#0074d9';
     const onMove = (ev: MouseEvent) => {
       if (!draggingRef.current) return;
       setSidebarW(Math.max(180, Math.min(500, startW + ev.clientX - startX)));
@@ -80,6 +84,42 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
   }, []);
   useEffect(() => { fetchAIConfig(); }, [fetchAIConfig]);
 
+  const toggleCollapse = useCallback(() => {
+    setCollapsed(c => {
+      const next = !c;
+      try { localStorage.setItem('vipershell:sidebar-collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  // Expose toggle so App can show a button when sidebar is collapsed
+  useEffect(() => {
+    (window as any).__vipershellToggleSidebar = toggleCollapse;
+    return () => { delete (window as any).__vipershellToggleSidebar; };
+  }, [toggleCollapse]);
+
+  if (collapsed) {
+    return (
+      <aside
+        className="hidden md:flex flex-col shrink-0 items-center py-2"
+        style={{ width: 36, background: 'var(--card)', borderRight: '1px solid var(--border)' }}
+      >
+        <button
+          onClick={toggleCollapse}
+          title="Expand sidebar"
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--muted-foreground)', padding: 4, borderRadius: 4,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          className="hover:text-foreground hover:bg-white/5"
+        >
+          <PanelLeftClose size={14} style={{ transform: 'scaleX(-1)' }} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className="hidden md:flex flex-col shrink-0"
@@ -91,14 +131,26 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
           position: 'absolute', top: 0, right: 0, width: 4, height: '100%',
           cursor: 'col-resize', zIndex: 20, background: 'transparent',
         }}
-        onMouseEnter={e => { if (!draggingRef.current) (e.currentTarget as HTMLElement).style.background = '#4ADE80'; }}
+        onMouseEnter={e => { if (!draggingRef.current) (e.currentTarget as HTMLElement).style.background = '#0074d9'; }}
         onMouseLeave={e => { if (!draggingRef.current) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
       />
       <div
         className="flex items-center justify-between px-4 py-3.5 border-b"
         style={{ borderColor: 'var(--border)' }}
       >
-        <span className="logo"><ViperIcon size={15} color="var(--primary)" /> vipershell</span>
+        <span className="logo"><ViperIcon size={15} color="var(--primary)" /> <span className="brand-gradient-text">vipershell</span></span>
+        <button
+          onClick={toggleCollapse}
+          title="Collapse sidebar"
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--muted-foreground)', padding: 4, borderRadius: 4,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          className="hover:text-foreground hover:bg-white/5"
+        >
+          <PanelLeftClose size={14} />
+        </button>
       </div>
 
       <SessionList
@@ -169,6 +221,8 @@ export default function Sidebar({ onConnect, send }: SidebarProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <MemoryIndicator onOpenSettings={() => setShowSettings(true)} />
 
         <Button
           variant="ghost"

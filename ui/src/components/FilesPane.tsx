@@ -183,7 +183,7 @@ function EntryRow({ entry, index, selected, focused, onSelect, onNavigate, gitSt
         display: 'flex', alignItems: 'center', gap: 7,
         padding: '4px 10px', cursor: 'pointer', userSelect: 'none',
         background: active ? '#1f3a56' : focused ? '#1a2332' : 'transparent',
-        borderLeft: focused ? '2px solid #4ADE80' : '2px solid transparent',
+        borderLeft: focused ? '2px solid #0074d9' : '2px solid transparent',
         borderBottom: '1px solid #111111',
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { if (!active) e.currentTarget.style.background = '#111111'; }}
@@ -239,20 +239,19 @@ function FileViewer({ path, cwd: viewerCwd, highlightQuery, highlightLine, onDel
   const pdfFile = isPdf(path ?? '');
   const textFile = isText(path ?? '');
 
-  // Load file
+  // Load file — keep previous content visible until new content arrives
   useEffect(() => {
     if (!path) return;
     setError(null); setSaveMsg(null);
     setMode(highlightQuery ? 'preview' : mdFile ? 'preview' : 'edit');
 
-    if (imgFile || pdfFile) { setContent(''); setOriginal(''); return; }
+    if (imgFile || pdfFile) { setContent(''); setOriginal(''); setLoading(false); return; }
 
     setLoading(true);
     fetch(`/api/fs/raw?path=${encodeURIComponent(path)}`)
       .then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t); }); return r.text(); })
-      .then(text => { setContent(text); setOriginal(text); })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .then(text => { setContent(text); setOriginal(text); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
   }, [path]); // eslint-disable-line
 
   // Scroll to highlighted line after content renders
@@ -403,10 +402,9 @@ function FileViewer({ path, cwd: viewerCwd, highlightQuery, highlightLine, onDel
       </div>
 
       {/* Content area */}
-      {loading && <div style={{ padding: 16, color: '#525252', fontSize: 12 }}>Loading\u2026</div>}
       {error   && <div style={{ padding: 16, color: '#F87171', fontSize: 12 }}>{error}</div>}
 
-      {!loading && !error && (
+      {!error && (
         <>
           {imgFile && (
             <div style={{ padding: 16, overflow: 'auto', flex: 1 }}>
@@ -522,9 +520,10 @@ function SearchResult({ result, isActive, onClick, query }: SearchResultProps) {
 interface SearchPanelProps {
   sessionId: string | null;
   onOpenFile: (path: string, query?: string, line?: number) => void;
+  active?: boolean;
 }
 
-export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
+export function SearchPanel({ sessionId, onOpenFile, active }: SearchPanelProps) {
   const [query, setQuery]       = useState('');
   const [glob, setGlob]         = useState('');
   const [showGlob, setShowGlob] = useState(false);
@@ -544,7 +543,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
   }
 
   const doSearch = useCallback(async (q: string, g: string) => {
-    if (!q.trim()) { setResults([]); setFileResults([]); setSearched(false); return; }
+    if (!sessionId || !q.trim()) { setResults([]); setFileResults([]); setSearched(false); return; }
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -594,8 +593,9 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
     inputRef.current?.focus();
   }, [sessionId]);
 
-  // Focus on mount
+  // Focus on mount and when tab becomes active
   useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { if (active) setTimeout(() => inputRef.current?.focus(), 0); }, [active]);
 
   const fileCount = Object.keys(grouped).length;
 
@@ -640,7 +640,7 @@ export function SearchPanel({ sessionId, onOpenFile }: SearchPanelProps) {
             title={glob ? `File filter active: ${glob}` : 'Filter by file type (e.g. *.ts, *.jsx)'}
             style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, display: 'flex',
-              color: showGlob || glob ? '#4ADE80' : '#525252',
+              color: showGlob || glob ? '#0074d9' : '#525252',
             }}
           >
             <Filter size={12} />
@@ -809,6 +809,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
   const fileListRef = useRef<HTMLDivElement>(null);
 
   const browse = useCallback(async (targetPath: string | null, { autoReadme = false }: { autoReadme?: boolean } = {}) => {
+    if (!sessionId) return;
     setLoading(true);
     try {
       const url = targetPath
@@ -887,7 +888,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     document.addEventListener('mouseup', onUp);
   }, [sidebarWidth]);
 
-  useEffect(() => { browse(null, { autoReadme: true }); setSelectedFile(null); setMobileView('list'); setGitStatus(null); }, [sessionId]); // eslint-disable-line
+  useEffect(() => { if (!sessionId) return; browse(null, { autoReadme: true }); setSelectedFile(null); setMobileView('list'); setGitStatus(null); }, [sessionId]); // eslint-disable-line
 
   // Fetch git status and refresh every 5s
   useEffect(() => {
@@ -958,8 +959,17 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
     if (deletedFile) onFileSelect?.(null as any);
   }, [selectedFile, dir, browse, onFileSelect]);
 
-  // Reset focused entry and filter when entries change
-  useEffect(() => { setFocusedEntry(-1); setFileFilter(''); }, [entries]);
+  // When entries change, restore focus to the selected file or default to first entry
+  useEffect(() => {
+    setFileFilter('');
+    if (selectedFile && entries.length > 0) {
+      const idx = entries.findIndex(e => e.path === selectedFile);
+      setFocusedEntry(idx >= 0 ? idx : (entries.length > 0 ? 0 : -1));
+    } else {
+      setFocusedEntry(entries.length > 0 ? 0 : -1);
+    }
+    setTimeout(() => fileListRef.current?.focus(), 0);
+  }, [entries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredEntries = fileFilter
     ? entries.filter(e => e.name.toLowerCase().includes(fileFilter.toLowerCase()))
@@ -975,6 +985,8 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       setFocusedEntry(prev => {
         const next = Math.min(prev + 1, filteredEntries.length - 1);
         fileListRef.current?.querySelector(`[data-entry-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+        const entry = filteredEntries[next];
+        if (entry && !entry.isDir) selectFile(entry.path);
         return next;
       });
       return;
@@ -984,35 +996,24 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
       setFocusedEntry(prev => {
         const next = Math.max(prev - 1, 0);
         fileListRef.current?.querySelector(`[data-entry-idx="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+        const entry = filteredEntries[next];
+        if (entry && !entry.isDir) selectFile(entry.path);
         return next;
       });
       return;
     }
-    // Left/Right: navigate between files (skip dirs), open on right
+    // Right/l: enter directory or open file
     if (e.key === 'ArrowRight' || e.key === 'l') {
       e.preventDefault();
       const entry = filteredEntries[focusedEntry];
-      if (entry?.isDir) { browse(entry.path); return; }
-      for (let i = focusedEntry + 1; i < filteredEntries.length; i++) {
-        if (!filteredEntries[i]!.isDir) {
-          setFocusedEntry(i);
-          selectFile(filteredEntries[i]!.path);
-          fileListRef.current?.querySelector(`[data-entry-idx="${i}"]`)?.scrollIntoView({ block: 'nearest' });
-          return;
-        }
-      }
+      if (!entry) return;
+      if (entry.isDir) browse(entry.path);
+      else selectFile(entry.path);
       return;
     }
+    // Left/h: go to parent directory
     if (e.key === 'ArrowLeft' || e.key === 'h') {
       e.preventDefault();
-      for (let i = focusedEntry - 1; i >= 0; i--) {
-        if (!filteredEntries[i]!.isDir) {
-          setFocusedEntry(i);
-          selectFile(filteredEntries[i]!.path);
-          fileListRef.current?.querySelector(`[data-entry-idx="${i}"]`)?.scrollIntoView({ block: 'nearest' });
-          return;
-        }
-      }
       if (dir && cwd && dir !== cwd) {
         const parent = dir.split('/').slice(0, -1).join('/') || '/';
         browse(parent);
@@ -1073,7 +1074,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           <button
             onClick={() => { setShowFileFilter(f => { if (!f) setTimeout(() => fileFilterRef.current?.focus(), 0); return !f; }); setFileFilter(''); }}
             title="Filter files"
-            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: showFileFilter ? '#4ADE80' : '#525252', flexShrink: 0, padding: 3 }}
+            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', color: showFileFilter ? '#0074d9' : '#525252', flexShrink: 0, padding: 3 }}
           >
             <Search size={12} />
           </button>
@@ -1192,7 +1193,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none',
         }}>
-          <div style={{ textAlign: 'center', color: '#4ADE80' }}>
+          <div style={{ textAlign: 'center', color: '#0074d9' }}>
             <Upload size={28} style={{ marginBottom: 6 }} />
             <div style={{ fontSize: 13, fontWeight: 500 }}>
               Drop to upload to /{dir?.split('/').pop() ?? ''}
@@ -1240,7 +1241,7 @@ export default function FilesPane({ sessionId, openFileRef, onFileSelect, highli
                 cursor: 'col-resize', zIndex: 10,
                 background: 'transparent',
               }}
-              onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#4ADE80'}
+              onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.background = '#0074d9'}
               onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { if (!draggingRef.current) e.currentTarget.style.background = 'transparent'; }}
             />
           </div>

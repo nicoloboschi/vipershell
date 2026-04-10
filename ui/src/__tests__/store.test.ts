@@ -26,6 +26,9 @@ describe('useStore', () => {
       sessionUrls: {},
       sessionLastCommand: {},
       sessionCurrentInput: {},
+      workspaces: {},
+      workspaceOrder: [],
+      workspaceZooms: {},
       wsStatus: 'connecting',
       sheetOpen: false,
       confirm: null,
@@ -158,13 +161,145 @@ describe('useStore', () => {
     })
   })
 
-  describe('split sessions', () => {
-    it('adds and removes split session IDs', () => {
-      useStore.getState().addSplitSession('$5')
-      expect(useStore.getState().splitSessionIds.has('$5')).toBe(true)
+  describe('workspaces', () => {
+    it('createWorkspace mints a synthetic id and stores the cells', () => {
+      const id = useStore.getState().createWorkspace(['$0'])
+      expect(id).toMatch(/^ws-/)
+      const ws = useStore.getState().workspaces[id]
+      expect(ws).toBeDefined()
+      expect(ws!.cells).toEqual(['$0'])
+      expect(ws!.layout).toBe('single')
+      expect(ws!.activeCell).toBe(0)
+      expect(useStore.getState().workspaceOrder).toContain(id)
+    })
 
-      useStore.getState().removeSplitSession('$5')
-      expect(useStore.getState().splitSessionIds.has('$5')).toBe(false)
+    it('appendPaneToWorkspace grows cells and auto-upgrades the layout', () => {
+      const id = useStore.getState().createWorkspace(['$0'])
+      useStore.getState().appendPaneToWorkspace(id, '$1')
+      const ws = useStore.getState().workspaces[id]!
+      expect(ws.cells).toEqual(['$0', '$1'])
+      expect(ws.layout).toBe('horizontal') // upgraded from 'single'
+      expect(ws.activeCell).toBe(1)        // focuses the newly-added pane
+    })
+
+    it('appendPaneToWorkspace respects an intentionally-larger layout', () => {
+      const id = useStore.getState().createWorkspace(['$0'])
+      // User switched to quad before panes populated — setGridState bumps layout.
+      useStore.getState().setGridState(id, 'quad', ['$0'], 0)
+      useStore.getState().appendPaneToWorkspace(id, '$1')
+      expect(useStore.getState().workspaces[id]!.layout).toBe('quad')
+    })
+
+    it('removePaneFromWorkspace downgrades layout and preserves active cell', () => {
+      const id = useStore.getState().createWorkspace(['$0', '$1', '$2', '$3'])
+      useStore.getState().setActivePane(id, 2)
+      const survivorId = useStore.getState().removePaneFromWorkspace(id, 1)
+      expect(survivorId).toBe(id)
+      const ws = useStore.getState().workspaces[id]!
+      expect(ws.cells).toEqual(['$0', '$2', '$3'])
+      expect(ws.layout).toBe('three')
+      // Active cell was $2 (index 2). $1 was removed, so $2 is now at index 1.
+      expect(ws.activeCell).toBe(1)
+    })
+
+    it('removePaneFromWorkspace deletes the workspace when the last pane leaves', () => {
+      const id = useStore.getState().createWorkspace(['$0'])
+      const survivorId = useStore.getState().removePaneFromWorkspace(id, 0)
+      expect(survivorId).toBeNull()
+      expect(useStore.getState().workspaces[id]).toBeUndefined()
+      expect(useStore.getState().workspaceOrder).not.toContain(id)
+    })
+
+    it('movePaneBetweenWorkspaces moves a pane and downgrades the source', () => {
+      const a = useStore.getState().createWorkspace(['$0', '$1'])
+      const b = useStore.getState().createWorkspace(['$2'])
+      const ok = useStore.getState().movePaneBetweenWorkspaces({
+        sourceId: a, sourceIdx: 1, targetId: b,
+      })
+      expect(ok).toBe(true)
+      expect(useStore.getState().workspaces[a]!.cells).toEqual(['$0'])
+      expect(useStore.getState().workspaces[a]!.layout).toBe('single')
+      expect(useStore.getState().workspaces[b]!.cells).toEqual(['$2', '$1'])
+      expect(useStore.getState().workspaces[b]!.layout).toBe('horizontal')
+      expect(useStore.getState().workspaces[b]!.activeCell).toBe(1) // moved pane gets focus
+    })
+
+    it('movePaneBetweenWorkspaces allows moving cell 0 (no more root restriction)', () => {
+      const a = useStore.getState().createWorkspace(['$0', '$1'])
+      const b = useStore.getState().createWorkspace(['$2'])
+      const ok = useStore.getState().movePaneBetweenWorkspaces({
+        sourceId: a, sourceIdx: 0, targetId: b,
+      })
+      expect(ok).toBe(true)
+      // Source still has $1, promoted to cell 0
+      expect(useStore.getState().workspaces[a]!.cells).toEqual(['$1'])
+      // Target gained $0
+      expect(useStore.getState().workspaces[b]!.cells).toEqual(['$2', '$0'])
+    })
+
+    it('movePaneBetweenWorkspaces dissolves the source when it empties', () => {
+      const a = useStore.getState().createWorkspace(['$0'])
+      const b = useStore.getState().createWorkspace(['$1'])
+      useStore.getState().setCurrentSessionId(a)
+      const ok = useStore.getState().movePaneBetweenWorkspaces({
+        sourceId: a, sourceIdx: 0, targetId: b,
+      })
+      expect(ok).toBe(true)
+      // Source workspace is gone (Android folder dissolved)
+      expect(useStore.getState().workspaces[a]).toBeUndefined()
+      // Target has both panes
+      expect(useStore.getState().workspaces[b]!.cells).toEqual(['$1', '$0'])
+      // Selection jumped to the target since the user was viewing the source
+      expect(useStore.getState().currentSessionId).toBe(b)
+    })
+
+    it('movePaneBetweenWorkspaces rejects when the target is full', () => {
+      const a = useStore.getState().createWorkspace(['$0'])
+      const b = useStore.getState().createWorkspace(['$1', '$2', '$3', '$4'])
+      const ok = useStore.getState().movePaneBetweenWorkspaces({
+        sourceId: a, sourceIdx: 0, targetId: b,
+      })
+      expect(ok).toBe(false)
+      expect(useStore.getState().workspaces[a]!.cells).toEqual(['$0'])
+    })
+  })
+
+  describe('renderSessions reconciliation', () => {
+    it('wraps fresh sessions in single-pane workspaces', () => {
+      useStore.getState().renderSessions([
+        makeSession('$0', 'a'),
+        makeSession('$1', 'b'),
+      ])
+      const { workspaces, workspaceOrder } = useStore.getState()
+      expect(workspaceOrder).toHaveLength(2)
+      const ids = workspaceOrder.map(id => workspaces[id]!.cells[0])
+      expect(ids).toEqual(expect.arrayContaining(['$0', '$1']))
+    })
+
+    it('prunes dead sessions and deletes empty workspaces', () => {
+      const id = useStore.getState().createWorkspace(['$0', '$1'])
+      useStore.getState().renderSessions([makeSession('$0', 'a')])
+      // $1 is gone — workspace keeps $0 only, layout shrinks to single
+      const ws = useStore.getState().workspaces[id]!
+      expect(ws.cells).toEqual(['$0'])
+      expect(ws.layout).toBe('single')
+
+      // Now $0 vanishes too — workspace should be deleted entirely
+      useStore.getState().renderSessions([])
+      expect(useStore.getState().workspaces[id]).toBeUndefined()
+    })
+
+    it('preserves existing workspaces across a session refresh', () => {
+      const id = useStore.getState().createWorkspace(['$0', '$1'])
+      useStore.getState().renderSessions([
+        makeSession('$0', 'a'),
+        makeSession('$1', 'b'),
+      ])
+      // Workspace shape is unchanged
+      const ws = useStore.getState().workspaces[id]!
+      expect(ws.cells).toEqual(['$0', '$1'])
+      // And no bonus workspace was minted for $0 or $1
+      expect(useStore.getState().workspaceOrder).toEqual([id])
     })
   })
 
@@ -203,14 +338,31 @@ describe('useStore', () => {
       expect(result).toBeNull()
     })
 
-    // navigateSession depends on DOM querySelectorAll('[data-session-id]'),
-    // so directional navigation requires component-level tests with rendered elements.
-    it('returns null when no DOM elements match', () => {
-      const sessions = [makeSession('$0', 'a'), makeSession('$1', 'b')]
-      useStore.getState().renderSessions(sessions)
-      useStore.getState().setCurrentSessionId('$0')
-      // In jsdom without rendered components, no DOM elements exist
+    it('returns null when only one workspace exists', () => {
+      useStore.getState().renderSessions([makeSession('$0', 'a')])
+      // Exactly one workspace was auto-minted — nowhere to navigate to.
       expect(useStore.getState().navigateSession('down')).toBeNull()
+    })
+
+    it('walks forward across workspaces in order', () => {
+      useStore.getState().renderSessions([
+        makeSession('$0', 'a'),
+        makeSession('$1', 'b'),
+      ])
+      const [firstId, secondId] = useStore.getState().workspaceOrder
+      useStore.getState().setCurrentSessionId(firstId!)
+      const next = useStore.getState().navigateSession('down')
+      expect(next?.workspaceId).toBe(secondId)
+    })
+
+    it('walks into each pane of a multi-pane workspace', () => {
+      const id = useStore.getState().createWorkspace(['$0', '$1'])
+      useStore.getState().createWorkspace(['$2'])
+      useStore.getState().setCurrentSessionId(id)
+      // First call from cell 0 should land on cell 1 of the same workspace.
+      const next = useStore.getState().navigateSession('down')
+      expect(next?.workspaceId).toBe(id)
+      expect(next?.paneIndex).toBe(1)
     })
   })
 })

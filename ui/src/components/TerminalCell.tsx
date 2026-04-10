@@ -2,23 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { ArrowDown, Upload } from 'lucide-react';
-import useStore, { activeTerminalSend, activeTerminalRefresh, activeTerminalScrollToLine, addCommandEntry, registerTerminalRefresh } from '../store';
-import { wsUrl } from '../serverUrl';
+import { ArrowDown, Upload, GripVertical } from 'lucide-react';
+import { useDroppable } from '@dnd-kit/core';
+import useStore, { activeTerminalSend, activeTerminalRefresh, activeTerminalScrollToLine, addCommandEntry, registerTerminalRefresh, registerTerminalSend, DEFAULT_FONT_SIZE } from '../store';
+import * as sharedWs from '../sharedWs';
+import PaneHeader from './PaneHeader';
+import { useDndEnabled } from '../dndEnabled';
 
-const filterAltScreen = (data: string): string =>
-  data
-    .replace(/\x1b\[\?(1049|47|1047)[hl]/g, '')   // strip alt-screen enter/exit
-    .replace(/\x1b\[3J/g, '')                       // strip clear-scrollback (CSI 3 J)
-    .replace(/\x1bc/g, '');                          // strip hard reset (RIS)
+// No output filtering needed — direct PTY output is passed through as-is.
+// (The old tmux bridge needed alt-screen stripping because tmux attach
+// would dump spurious alt-screen transitions. Direct PTY doesn't have that.)
 
 // Match URLs: scheme + domain + optional path/query/fragment (stop at whitespace, quotes, parens, angles, control chars)
 const URL_RE = /https?:\/\/[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9](?::\d+)?(?:\/[^\s"'<>()\x1b\x07\u0007\]{}|\\^`]*)?/g;
 const stripAnsi = (s: string) => s.replace(/\x1b(?:\[[0-9;]*[a-zA-Z]|\].*?(?:\x07|\x1b\\))/g, '');
 
 const TERMINAL_THEME = {
-  background: '#0c0c0c', foreground: '#d4d4d8', cursor: '#4ADE80', cursorAccent: '#0c0c0c',
-  selectionBackground: 'rgba(74,222,128,0.25)',
+  background: '#111111', foreground: '#d4d4d8', cursor: '#0074d9', cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(0,116,217,0.25)',
   black: '#3B3B3B', brightBlack: '#525252', red: '#F87171', brightRed: '#FCA5A5',
   green: '#4ADE80', brightGreen: '#86EFAC', yellow: '#FACC15', brightYellow: '#FDE68A',
   blue: '#60A5FA', brightBlue: '#93C5FD', magenta: '#C084FC', brightMagenta: '#D8B4FE',
@@ -27,22 +28,68 @@ const TERMINAL_THEME = {
 
 interface TerminalCellProps {
   sessionId: string;
+  /** Synthetic workspace id this cell belongs to. All panes in the same
+   *  workspace share zoom, layout, and lifecycle through this key. It is
+   *  NOT equal to any session id — there's no "root pane" concept anymore. */
+  gridId: string;
+  /** This pane's position within the workspace's `cells` array. Needed so
+   *  the drag handle and drop target can identify the pane for swap/move. */
+  paneIndex: number;
   isActive: boolean;
   onActivate: () => void;
+  /** Remove this pane from its workspace. If it was the last pane, the
+   *  workspace dissolves (Android-folder style). */
+  onClose: () => void;
   onFileLinkClick?: (path: string) => void;
 }
 
-export default function TerminalCell({ sessionId, isActive, onActivate, onFileLinkClick }: TerminalCellProps) {
+export default function TerminalCell({ sessionId, gridId, paneIndex, isActive, onActivate, onClose, onFileLinkClick }: TerminalCellProps) {
+  // `gridId` holds the synthetic workspace id — zoom is keyed by workspace so
+  // every pane sharing a workspace scales together.
+  const zoom = useStore(s => s.workspaceZooms[gridId]);
+  const isMultiPane = useStore(s => {
+    const ws = s.workspaces[gridId];
+    return !!ws && ws.layout !== 'single' && ws.cells.length > 1;
+  });
+  const isZen = useStore(s => s.zenSessionId === sessionId);
+  const toggleZen = useStore(s => s.toggleZen);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const rendererReadyRef = useRef(false);
+
+  /** Safe fit — bails out if container isn't visible or terminal isn't mounted.
+   *  Swallows all errors since xterm's async refresh can crash on "dimensions". */
+  const safeFit = () => {
+    const el = containerRef.current;
+    const fit = fitAddonRef.current;
+    const t = termRef.current;
+    if (!el || !fit || !t) return;
+    if (el.clientWidth < 1 || el.clientHeight < 1) return;
+    if (!rendererReadyRef.current) return;
+    try { fit.fit(); } catch { /* noop */ }
+  };
+  // wsRef removed — using shared WebSocket singleton
   const sendRef = useRef<(msg: Record<string, unknown>) => void>(() => {});
   const pendingResetRef = useRef(false);
   const mountedRef = useRef(true);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const dragCountRef = useRef(0);
+  /** File-drop state — TerminalCell only handles native file drops via the
+   *  HTML5 drag-and-drop API now. Pane drops go through dnd-kit (see
+   *  `useDroppable` below) which is a separate event stream and doesn't
+   *  collide with this. */
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const fileDragCountRef = useRef(0);
+
+  // dnd-kit droppable for pane drops. Same-workspace swap is handled in
+  // App.tsx onDragEnd. `isOver` drives the overlay visual. Disabled on
+  // mobile where all dnd is off.
+  const dndEnabled = useDndEnabled();
+  const { setNodeRef: setPaneDropRef, isOver: isPaneDragOver } = useDroppable({
+    id: `terminal-cell:${gridId}:${paneIndex}`,
+    data: { kind: 'terminal-cell', workspaceId: gridId, paneIdx: paneIndex },
+    disabled: !dndEnabled,
+  });
 
   // Output batching — accumulate chunks and flush once per animation frame
   const outputBufRef = useRef('');
@@ -52,10 +99,13 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   // Create terminal once
   useEffect(() => {
     const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    // Read the current zoom synchronously at mount so the terminal opens at the right size.
+    const initialFontSize =
+      useStore.getState().workspaceZooms[gridId] ?? DEFAULT_FONT_SIZE();
     const term = new Terminal({
       cursorBlink: !isMobile,
       fontFamily: '"JetBrains Mono", monospace',
-      fontSize: isMobile ? 11 : 14,
+      fontSize: initialFontSize,
       lineHeight: 1.2,
       scrollback: isMobile ? 1000 : 5000,
       theme: TERMINAL_THEME,
@@ -67,11 +117,90 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     termRef.current = term;
     fitAddonRef.current = fit;
 
-    // Mount
-    const el = containerRef.current;
-    if (el) {
+    // Intercept PageUp/PageDown and Shift+Up/Down for scrollback navigation
+    // instead of sending them to the shell (most CLIs don't handle them anyway).
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== 'keydown') return true;
+      const rows = term.rows || 20;
+      if (e.key === 'PageUp') {
+        if (e.shiftKey) {
+          term.scrollToTop();
+        } else {
+          term.scrollLines(-Math.max(1, rows - 1));
+        }
+        return false; // stop, don't send to shell
+      }
+      if (e.key === 'PageDown') {
+        if (e.shiftKey) {
+          term.scrollToBottom();
+        } else {
+          term.scrollLines(Math.max(1, rows - 1));
+        }
+        return false;
+      }
+      if (e.shiftKey && e.key === 'ArrowUp') {
+        term.scrollLines(-1);
+        return false;
+      }
+      if (e.shiftKey && e.key === 'ArrowDown') {
+        term.scrollLines(1);
+        return false;
+      }
+      if (e.shiftKey && e.key === 'Home') {
+        term.scrollToTop();
+        return false;
+      }
+      if (e.shiftKey && e.key === 'End') {
+        term.scrollToBottom();
+        return false;
+      }
+      return true;
+    });
+
+    // Mount — wait until container has dimensions before calling term.open().
+    // Sessions can start hidden (display:none in activeVisited cache) and only
+    // become visible when the user switches to them. Use a ResizeObserver so
+    // we open the terminal the moment the container gets real dimensions —
+    // no RAF polling, no giving up after N attempts.
+    let disposed = false;
+    let opened = false;
+    let renderDispose: { dispose: () => void } | null = null;
+    let openObserver: ResizeObserver | null = null;
+
+    const tryOpen = () => {
+      if (disposed || opened) return;
+      const el = containerRef.current;
+      if (!el || el.clientWidth < 1 || el.clientHeight < 1) return;
+      opened = true;
+      openObserver?.disconnect();
+      openObserver = null;
+
       term.open(el);
-      fit.fit();
+
+      renderDispose = term.onRender(() => {
+        renderDispose?.dispose();
+        rendererReadyRef.current = true;
+        requestAnimationFrame(() => {
+          if (disposed) return;
+          const cur = containerRef.current;
+          const f = fitAddonRef.current;
+          if (!cur || !f || cur.clientWidth < 1 || cur.clientHeight < 1) return;
+          try {
+            f.fit();
+            const t = termRef.current;
+            if (t) sendRef.current({ type: 'resize', cols: t.cols, rows: t.rows });
+          } catch { /* noop */ }
+        });
+      });
+      term.write('');
+    };
+
+    // Try immediately; if container isn't ready, observe it until it is.
+    if (containerRef.current && containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+      tryOpen();
+    } else if (containerRef.current) {
+      openObserver = new ResizeObserver(() => tryOpen());
+      openObserver.observe(containerRef.current);
     }
 
     // Input handler — also tracks typed commands for the history TOC
@@ -103,39 +232,81 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       trackCommand(data);
     }
 
-    // On mobile, Android's virtual keyboard uses IME composition for word
-    // prediction. xterm.js fires onData for EVERY intermediate composition
-    // state ("r","re","rep",...) AND the final text, causing massive duplication.
-    // Fix: track composition state on xterm's textarea, suppress onData during
-    // composition, and send only the final committed text.
-    let composing = false;
+    // On mobile, virtual keyboards (both Android IME and iOS predictive text)
+    // cause xterm.js to fire onData with duplicated intermediate text.
+    // Fix: on mobile, suppress xterm's onData entirely for printable text and
+    // instead monitor the hidden textarea's input events, sending only the
+    // actual delta (new characters) to the terminal.
+    let mobileIntercepting = false;
     let mobileCleanup: (() => void) | null = null;
 
-    if (isMobile && el) {
-      const textarea = el.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    if (isMobile && containerRef.current) {
+      const textarea = containerRef.current.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
       if (textarea) {
+        mobileIntercepting = true;
+        let prevValue = '';
+        let composing = false;
+
         const onCompStart = () => { composing = true; };
-        const onCompEnd = () => { composing = false; };
+        const onCompEnd = () => {
+          composing = false;
+          // After composition ends, the textarea has the committed text.
+          // Send only the delta vs what we last sent.
+          const cur = textarea.value;
+          if (cur.length > prevValue.length) {
+            const delta = cur.slice(prevValue.length);
+            sendInput(delta);
+          }
+          prevValue = cur;
+        };
+
+        const onInput = () => {
+          if (composing) return; // handled by compositionend
+          const cur = textarea.value;
+          if (cur.length > prevValue.length) {
+            const delta = cur.slice(prevValue.length);
+            sendInput(delta);
+          } else if (cur.length < prevValue.length && prevValue.length > 0) {
+            // Deletion — let xterm handle via onData (backspace key events)
+          }
+          prevValue = cur;
+        };
+
+        // Reset tracking when the textarea is cleared (xterm clears it after processing)
+        const onSelect = () => { prevValue = textarea.value; };
+
         textarea.addEventListener('compositionstart', onCompStart);
         textarea.addEventListener('compositionend', onCompEnd);
+        textarea.addEventListener('input', onInput);
+        textarea.addEventListener('select', onSelect);
+        // Periodically sync prevValue in case xterm clears the textarea
+        const syncInterval = setInterval(() => {
+          if (!composing && textarea.value === '') prevValue = '';
+        }, 200);
+
         mobileCleanup = () => {
           textarea.removeEventListener('compositionstart', onCompStart);
           textarea.removeEventListener('compositionend', onCompEnd);
+          textarea.removeEventListener('input', onInput);
+          textarea.removeEventListener('select', onSelect);
+          clearInterval(syncInterval);
         };
       }
     }
 
     const dataDispose = term.onData((data: string) => {
-      if (isMobile && composing) {
-        // During composition, suppress all onData — we'll get the final
-        // text when compositionend fires and xterm emits it via onData.
-        return;
+      if (mobileIntercepting) {
+        // On mobile, only let through control characters (Enter, backspace,
+        // arrow keys, etc.) — printable text is handled via input events above.
+        const isPrintable = data.length === 1 && data >= ' ' && data <= '~';
+        const isMultiChar = data.length > 1 && !data.startsWith('\x1b');
+        if (isPrintable || isMultiChar) return;
       }
       sendInput(data);
     });
 
     // Scroll position tracking — show "jump to bottom" when scrolled up
-    const SCROLL_THRESHOLD = 5; // lines from bottom to trigger
+    const SCROLL_THRESHOLD = 1; // lines from bottom to trigger
     const scrollDispose = term.onScroll(() => {
       const buf = term.buffer.active;
       const linesFromBottom = buf.baseY - buf.viewportY;
@@ -156,9 +327,13 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
       scrollDispose.dispose();
       dataDispose.dispose();
       bellDispose.dispose();
+      disposed = true;
+      openObserver?.disconnect();
+      renderDispose?.dispose();
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
+      rendererReadyRef.current = false;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -195,15 +370,35 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   function flushOutput() {
     flushRafRef.current = 0;
     const batch = outputBufRef.current;
-    outputBufRef.current = '';
     const t = termRef.current;
-    if (!t || !batch) return;
-    t.write(batch, () => {
-      if (isRestoringRef.current) {
-        isRestoringRef.current = false;
-        t.scrollToBottom();
-      }
-    });
+    if (!t || !batch) { flushRafRef.current = 0; return; }
+    // Don't write until renderer is ready AND container has dimensions —
+    // xterm's syncScrollArea will crash on 'dimensions' access otherwise.
+    const el = containerRef.current;
+    if (!el || el.clientWidth < 1 || el.clientHeight < 1 || !rendererReadyRef.current) {
+      flushRafRef.current = requestAnimationFrame(flushOutput);
+      return;
+    }
+    outputBufRef.current = '';
+    try {
+      t.write(batch, () => {
+        if (isRestoringRef.current) {
+          isRestoringRef.current = false;
+          // Wait a frame after write completes so xterm's viewport has
+          // laid out the new content, then two more times to guard against
+          // additional async rendering (especially in multi-pane grids).
+          requestAnimationFrame(() => {
+            t.scrollToBottom();
+            requestAnimationFrame(() => t.scrollToBottom());
+          });
+        }
+      });
+    } catch {
+      // Renderer not ready — re-queue the batch
+      outputBufRef.current = batch + outputBufRef.current;
+      flushRafRef.current = requestAnimationFrame(flushOutput);
+      return;
+    }
     const plain = stripAnsi(batch);
     const urls = plain.match(URL_RE);
     if (urls) {
@@ -221,76 +416,66 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     }
   }
 
-  // WebSocket connection
+  // Subscribe to shared WebSocket for this session's output
   useEffect(() => {
     mountedRef.current = true;
-    let ws: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let unregRefresh: (() => void) | null = null;
-    let delay = 1000;
 
-    function openWs(): void {
+    // Send messages tagged with this session's ID
+    sendRef.current = (msg: Record<string, unknown>) => {
+      sharedWs.send({ ...msg, session_id: sessionId });
+    };
+
+    const unregRefresh = registerTerminalRefresh(sessionId, () => {
+      const t = termRef.current;
+      sharedWs.send({ type: 'subscribe', session_id: sessionId, ...(t ? { cols: t.cols, rows: t.rows } : {}) });
+      pendingResetRef.current = true;
+      outputBufRef.current = '';
+    });
+    const unregSend = registerTerminalSend(sessionId, (msg) => sendRef.current(msg));
+
+    // Handle session-specific messages (output, connected)
+    // Send terminal dimensions with subscribe so server resizes before snapshot
+    const term = termRef.current;
+    const cols = term?.cols;
+    const rows = term?.rows;
+    const unsubSession = sharedWs.subscribeSession(sessionId, (msg) => {
       if (!mountedRef.current) return;
-      ws = new WebSocket(wsUrl());
-      wsRef.current = ws;
 
-      sendRef.current = (msg: Record<string, unknown>) => {
-        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-      };
-      unregRefresh = registerTerminalRefresh(sessionId, () => sendRef.current({ type: 'connect', session_id: sessionId }));
-
-      ws.onopen = () => {
-        if (!mountedRef.current) return;
-        delay = 1000;
-        fitAddonRef.current?.fit();
-        sendRef.current({ type: 'connect', session_id: sessionId });
-      };
-
-      ws.onmessage = (ev: MessageEvent) => {
-        if (!mountedRef.current) return;
-        let msg: any;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-
-        if (msg.type === 'sessions') {
-          useStore.getState().renderSessions(msg.sessions);
-        } else if (msg.type === 'preview') {
-          useStore.getState().updatePreview(msg.session_id, msg.preview, msg.busy);
-        } else if (msg.type === 'last_command') {
-          useStore.getState().setLastCommand(msg.session_id, msg.command);
-        } else if (msg.type === 'connected') {
-          pendingResetRef.current = true;
-          isRestoringRef.current = true;
-          const term = termRef.current;
-          if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
-        } else if (msg.type === 'output') {
-          const term = termRef.current;
-          if (!term) return;
-          if (pendingResetRef.current) {
-            pendingResetRef.current = false;
-            term.reset();
-          }
-          const filtered = filterAltScreen(msg.data);
-          outputBufRef.current += filtered;
-          scheduleFlush();
+      if (msg.type === 'connected') {
+        pendingResetRef.current = true;
+        isRestoringRef.current = true;
+        // Discard any buffered output from before the reset
+        outputBufRef.current = '';
+        // No resize needed here — cols/rows were sent with subscribe
+      } else if (msg.type === 'output') {
+        const term = termRef.current;
+        if (!term) return;
+        if (pendingResetRef.current) {
+          pendingResetRef.current = false;
+          term.reset();
         }
-      };
+        outputBufRef.current += msg.data as string;
+        scheduleFlush();
+      }
+    }, cols, rows);
 
-      ws.onclose = () => {
-        if (!mountedRef.current) return;
-        retryTimer = setTimeout(() => {
-          delay = Math.min(delay * 2, 30_000);
-          openWs();
-        }, delay);
-      };
-    }
+    // Prepare for incoming snapshot — on WS reconnect the server will
+    // re-send connected+snapshot; set pendingReset so old content is cleared
+    const unsubGlobal = sharedWs.subscribeGlobal((msg) => {
+      if (msg.type === '__ws_open__') {
+        pendingResetRef.current = true;
+        outputBufRef.current = '';
+      }
+    });
 
-    openWs();
+    // Fit handled by the ResizeObserver effect — no need to call here
 
     return () => {
       mountedRef.current = false;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (unregRefresh) unregRefresh();
-      if (ws) { ws.onclose = null; ws.close(); }
+      unregRefresh();
+      unregSend();
+      unsubSession();
+      unsubGlobal();
       if (flushRafRef.current) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = 0; }
       outputBufRef.current = '';
     };
@@ -302,7 +487,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     const handleResize = (): void => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        fitAddonRef.current?.fit();
+        safeFit();
         const term = termRef.current;
         if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
       }, 80);
@@ -311,28 +496,53 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     return () => { window.removeEventListener('resize', handleResize); if (timer) clearTimeout(timer); };
   }, []);
 
+  // Apply zoom changes — update font size and refit
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const target = zoom ?? DEFAULT_FONT_SIZE();
+    if (term.options.fontSize === target) return;
+    term.options.fontSize = target;
+    // Small delay so xterm can measure the new font before fitting
+    const id = setTimeout(() => {
+      safeFit();
+      const t = termRef.current;
+      if (t) sendRef.current({ type: 'resize', cols: t.cols, rows: t.rows });
+    }, 20);
+    return () => clearTimeout(id);
+  }, [zoom]);
+
   // ResizeObserver on container for panel resize (debounced)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let followup: ReturnType<typeof setTimeout> | null = null;
     const doFit = () => {
-      try { fitAddonRef.current?.fit(); } catch { /* ignore */ }
-      const term = termRef.current;
-      if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
+      safeFit();
+      const t = termRef.current;
+      if (t) sendRef.current({ type: 'resize', cols: t.cols, rows: t.rows });
     };
     const ro = new ResizeObserver(() => {
       if (timer) clearTimeout(timer);
+      if (followup) clearTimeout(followup);
       timer = setTimeout(doFit, 50);
+      followup = setTimeout(doFit, 200);
     });
     ro.observe(el);
-    return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
+    return () => {
+      ro.disconnect();
+      if (timer) clearTimeout(timer);
+      if (followup) clearTimeout(followup);
+    };
   }, []);
 
-  // Focus when active + register as the target for mobile key bar
+  // Focus + scroll to bottom when active + register as target for mobile key bar
   useEffect(() => {
     if (isActive) {
-      termRef.current?.focus();
+      const t = termRef.current;
+      t?.focus();
+      t?.scrollToBottom();
       activeTerminalSend.current = (msg) => sendRef.current(msg);
       activeTerminalRefresh.current = () => sendRef.current({ type: 'connect', session_id: sessionId });
       activeTerminalScrollToLine.current = (line: number) => {
@@ -350,7 +560,7 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   useEffect(() => {
     const handler = () => {
       if (!isActive) return;
-      fitAddonRef.current?.fit();
+      safeFit();
       termRef.current?.focus();
       const term = termRef.current;
       if (term) sendRef.current({ type: 'resize', cols: term.cols, rows: term.rows });
@@ -358,6 +568,30 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
     window.addEventListener('vipershell:terminal-tab-active', handler);
     return () => window.removeEventListener('vipershell:terminal-tab-active', handler);
   }, [isActive]);
+
+  // Refit when entering/exiting zen mode — the container dimensions change
+  // dramatically so we need to recalculate cols/rows.
+  useEffect(() => {
+    // Two frames: one for layout, one for fit after xterm's renderer catches up
+    const id1 = requestAnimationFrame(() => {
+      const id2 = requestAnimationFrame(() => {
+        safeFit();
+        const t = termRef.current;
+        if (t) {
+          sendRef.current({ type: 'resize', cols: t.cols, rows: t.rows });
+          t.focus();
+          t.scrollToBottom();
+        }
+      });
+      (window as any).__zenRafId = id2;
+    });
+    return () => {
+      cancelAnimationFrame(id1);
+      const id2 = (window as any).__zenRafId;
+      if (id2) cancelAnimationFrame(id2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isZen]);
 
   // Touch scroll with momentum (iOS-style inertial scrolling)
   useEffect(() => {
@@ -483,8 +717,11 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
 
   async function handleDrop(e: React.DragEvent) {
     e.preventDefault();
-    setDragOver(false);
-    dragCountRef.current = 0;
+    setFileDragOver(false);
+    fileDragCountRef.current = 0;
+
+    // Only files are handled here — pane drops come through dnd-kit and
+    // resolve in App.tsx's onDragEnd.
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
 
@@ -517,26 +754,100 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
   }
 
   return (
-    <div
-      className="flex-1 min-h-0 min-w-0"
-      style={{
+    <>
+      {/* Zen backdrop — dims everything behind the pane */}
+      {isZen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999,
+            background: 'radial-gradient(ellipse at center, rgba(0,10,25,0.92) 0%, rgba(0,0,0,0.98) 100%)',
+            backdropFilter: 'blur(8px)',
+            animation: 'zen-enter 0.2s ease-out',
+          }}
+          onClick={() => toggleZen(sessionId)}
+        />
+      )}
+      <div
+        ref={setPaneDropRef}
+        className={isZen ? '' : 'flex-1 min-h-0 min-w-0'}
+        style={{
+          position: isZen ? 'fixed' : 'relative',
+          ...(isZen ? {
+            inset: '40px',
+            zIndex: 1000,
+            borderRadius: 14,
+            padding: 2,
+            background: 'linear-gradient(135deg, rgba(0,116,217,0.7) 0%, rgba(0,146,150,0.7) 100%)',
+            boxShadow: '0 0 80px rgba(0,116,217,0.35), 0 0 160px rgba(0,146,150,0.15), 0 20px 60px rgba(0,0,0,0.6)',
+            animation: 'zen-enter 0.25s ease-out',
+          } : {}),
+          display: 'flex', flexDirection: 'column',
+          background: isZen ? undefined : '#0c0c0c',
+          overflow: 'hidden',
+          outline: (fileDragOver || isPaneDragOver) ? '2px solid var(--primary)' : 'none',
+        }}
+        onClick={onActivate}
+        // mousedown with capture — runs before xterm's own handler so we
+        // always register the focus change even when xterm stops propagation.
+        onMouseDownCapture={onActivate}
+        // Native HTML5 drag events ONLY handle external file drops now.
+        // Pane drags are intercepted by dnd-kit (useDroppable above), which
+        // operates on a separate event stream and doesn't fire dragenter/over/drop.
+        onDragEnter={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            fileDragCountRef.current++;
+            setFileDragOver(true);
+          }
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+        }}
+        onDragLeave={() => {
+          fileDragCountRef.current--;
+          if (fileDragCountRef.current <= 0) { setFileDragOver(false); fileDragCountRef.current = 0; }
+        }}
+        onDrop={handleDrop}
+      >
+      {/* Inner wrapper — in zen mode, gives the rounded dark card look */}
+      <div style={{
         position: 'relative',
+        flex: 1, minHeight: 0,
         display: 'flex', flexDirection: 'column',
-        background: '#0c0c0c', overflow: 'hidden',
-        outline: dragOver ? '2px solid var(--primary)' : isActive ? '1px solid var(--primary)' : '1px solid transparent',
-        outlineOffset: -1,
-      }}
-      onClick={onActivate}
-      onDragEnter={(e) => { e.preventDefault(); dragCountRef.current++; setDragOver(true); }}
-      onDragOver={(e) => { e.preventDefault(); }}
-      onDragLeave={() => { dragCountRef.current--; if (dragCountRef.current <= 0) { setDragOver(false); dragCountRef.current = 0; } }}
-      onDrop={handleDrop}
-    >
+        background: '#0a0a0a',
+        borderRadius: isZen ? 12 : 0,
+        overflow: 'hidden',
+      }}>
+      {/* Per-pane header — identity, stats, zen toggle, close. Rendered in
+          zen too, since the zen exit button lives in this header. */}
+      <PaneHeader
+        sessionId={sessionId}
+        workspaceId={gridId}
+        paneIndex={paneIndex}
+        isActive={isActive}
+        isGridRoot={sessionId === gridId}
+        onClose={onClose}
+      />
+      {/* Terminal surface — own relative container so absolute-positioned
+          .terminal-pane fills only this area (below the header), and the
+          active-pane / drag overlays sit on top of the terminal only. */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <div
         ref={containerRef}
         className="terminal-pane"
       />
-      {dragOver && (
+      {/* Active pane border overlay — rendered above the terminal so it's
+          visible even though .terminal-pane covers the entire container. */}
+      {isMultiPane && isActive && !isPaneDragOver && !fileDragOver && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 15,
+          borderRadius: 8,
+          boxShadow: '0 0 0 1.5px var(--primary), 0 0 14px rgba(0,116,217,0.35)',
+          pointerEvents: 'none',
+          transition: 'box-shadow 0.15s ease',
+        }} />
+      )}
+      {(isPaneDragOver || fileDragOver) && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 20,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -547,8 +858,17 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
             color: 'var(--primary)', fontSize: 13, fontWeight: 600,
           }}>
-            <Upload size={28} />
-            Drop to upload
+            {isPaneDragOver ? (
+              <>
+                <GripVertical size={28} />
+                Drop to swap panes
+              </>
+            ) : (
+              <>
+                <Upload size={28} />
+                Drop to upload
+              </>
+            )}
           </div>
         </div>
       )}
@@ -568,25 +888,28 @@ export default function TerminalCell({ sessionId, isActive, onActivate, onFileLi
             display: 'flex',
             alignItems: 'center',
             gap: 5,
-            padding: '5px 14px',
+            padding: '6px 14px',
             borderRadius: 20,
             border: '1px solid var(--border)',
             background: 'rgba(22, 27, 34, 0.92)',
             backdropFilter: 'blur(8px)',
-            color: 'var(--muted-foreground)',
+            color: 'var(--foreground)',
             fontSize: 11,
             cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            transition: 'opacity 0.15s, transform 0.15s',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+            transition: 'border-color 0.15s',
             animation: 'fade-in 0.15s ease',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.borderColor = 'var(--primary)'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--muted-foreground)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
         >
           <ArrowDown size={12} />
-          Bottom
+          Jump to bottom
         </button>
       )}
-    </div>
+      </div>{/* /terminal surface */}
+      </div>{/* /inner wrapper */}
+      </div>{/* /outer wrapper */}
+    </>
   );
 }

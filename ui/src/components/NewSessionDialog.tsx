@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, FolderGit2, GitBranch, ChevronDown, ChevronRight, FolderOpen, Eye, EyeOff } from 'lucide-react';
+import { Search, FolderGit2, GitBranch, ChevronDown, ChevronRight, FolderOpen, Sparkles } from 'lucide-react';
 import useStore, { type Session } from '../store';
 import { relativeTime } from '../utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
@@ -149,6 +149,25 @@ export default function NewSessionDialog({ onClose, onSelect, title, icon }: New
                 style={{ color: 'var(--foreground)', fontFamily: '"JetBrains Mono", monospace' }}
               />
             </div>
+          </div>
+
+          {/* Vibe session — random workspace */}
+          <div className="px-4 pb-1">
+            <button
+              onClick={() => pick('__vibe__')}
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left hover:bg-accent group"
+              style={{ transition: 'background 0.1s', border: '1px dashed var(--border)' }}
+            >
+              <Sparkles size={13} className="text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>
+                  Vibe session
+                </span>
+                <div className="text-[10px] text-muted-foreground" style={{ opacity: 0.5 }}>
+                  Fresh workspace in ~/.vipershell/vibe-sessions/
+                </div>
+              </div>
+            </button>
           </div>
 
           {/* Recent projects */}

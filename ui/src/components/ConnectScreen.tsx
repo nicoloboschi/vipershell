@@ -52,8 +52,8 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
       }}
     >
       <div style={{ textAlign: 'center', marginBottom: 8 }}>
-        <div style={{ marginBottom: 8 }}><ViperIcon size={40} color="#4ADE80" /></div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: '#4ADE80', fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.5px' }}>vipershell</h1>
+        <div style={{ marginBottom: 8 }}><ViperIcon size={40} color="#0074d9" /></div>
+        <h1 className="brand-gradient-text" style={{ fontSize: 20, fontWeight: 700, margin: 0, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.5px' }}>vipershell</h1>
         <p style={{ fontSize: 13, color: '#737373', margin: '6px 0 0' }}>Connect to your server</p>
       </div>
 
@@ -93,8 +93,8 @@ export default function ConnectScreen({ onConnected }: ConnectScreenProps) {
             padding: '10px 0',
             borderRadius: 8,
             border: 'none',
-            background: testing ? '#1a1a1a' : '#4ADE80',
-            color: testing ? '#737373' : '#0c0c0c',
+            background: testing ? '#1a1a1a' : 'linear-gradient(135deg, #0074d9 0%, #009296 100%)',
+            color: testing ? '#737373' : '#ffffff',
             fontSize: 14,
             fontWeight: 600,
             cursor: testing ? 'default' : 'pointer',

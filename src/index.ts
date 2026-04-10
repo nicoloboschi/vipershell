@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { TmuxBridge } from './bridge.js';
+import { DirectBridge } from './direct-bridge.js';
 import { MemoryStore } from './memory.js';
 import { AIService } from './ai.js';
 import { createApp, logger } from './server.js';
@@ -19,7 +19,7 @@ const program = new Command();
 
 program
   .name('vipershell')
-  .description('Your machine, anywhere — tmux sessions in your browser')
+  .description('Your machine, anywhere — terminal sessions in your browser')
   .version(pkgVersion)
   .option('--host <host>', 'Host to bind to', config.host)
   .option('--port <port>', 'Port to listen on', String(config.port))
@@ -31,7 +31,7 @@ program
     const memory = new MemoryStore();
     memory.startInBackground();
 
-    const bridge = new TmuxBridge();
+    const bridge = new DirectBridge();
     bridge.setMemory(memory);
     await bridge.start();
 

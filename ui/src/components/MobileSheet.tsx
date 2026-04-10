@@ -163,7 +163,7 @@ export default function MobileSheet({ onConnect, send }: MobileSheetProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" className="w-48">
-              <DropdownMenuLabel className="text-xs flex items-center gap-1"><ViperIcon size={13} color="var(--primary)" /> vipershell</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-xs flex items-center gap-1"><ViperIcon size={13} color="var(--primary)" /> <span className="brand-gradient-text">vipershell</span></DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setShowLogs(true)}>
                 <ScrollText size={14} /> Server Logs

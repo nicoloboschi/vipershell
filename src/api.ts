@@ -1,14 +1,16 @@
 import { Router } from 'express';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, watchFile, unwatchFile } from 'fs';
+import { rgPath } from '@vscode/ripgrep';
+import { existsSync, createReadStream, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, unlinkSync, watchFile, unwatchFile } from 'fs';
 import nodePath from 'path';
 import http from 'http';
 import os from 'os';
 import si from 'systeminformation';
-import type { TmuxBridge } from './bridge.js';
+import type { DirectBridge } from './direct-bridge.js';
 import type { LogBuffer } from './server.js';
 import type { MemoryStore } from './memory.js';
+import { logMemoryActivity, getMemoryActivity, capPayload, type MemoryActivity } from './memory.js';
 import type { AIService } from './ai.js';
 
 const execAsync = promisify(exec);
@@ -18,8 +20,34 @@ const PKG_VERSION: string = (() => {
   catch { return 'unknown'; }
 })();
 
-export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory: MemoryStore, ai: AIService): Router {
+/** Detect which plugin is making a proxy call based on headers, user-agent, or path */
+function _detectPluginSource(req: { headers: Record<string, unknown>; url?: string; originalUrl?: string }): 'claude-code' | 'codex' | 'hermes' | 'plugin' {
+  const ua = String(req.headers['user-agent'] ?? '').toLowerCase();
+  const xSource = String(req.headers['x-hindsight-source'] ?? '').toLowerCase();
+  if (ua.includes('claude') || xSource.includes('claude')) return 'claude-code';
+  if (ua.includes('codex') || xSource.includes('codex')) return 'codex';
+  if (ua.includes('hermes') || xSource.includes('hermes')) return 'hermes';
+  // Detect by bank ID in path — read configured bank IDs
+  const url = req.originalUrl ?? req.url ?? '';
+  try {
+    const ccCfg = JSON.parse(readFileSync(nodePath.join(os.homedir(), '.hindsight', 'claude-code.json'), 'utf-8'));
+    if (ccCfg.bankId && url.includes(`/banks/${ccCfg.bankId}/`)) return 'claude-code';
+  } catch { /* ignore */ }
+  try {
+    const cxCfg = JSON.parse(readFileSync(nodePath.join(os.homedir(), '.config', 'codex', 'config.toml'), 'utf-8'));
+    if (cxCfg.bankId && url.includes(`/banks/${cxCfg.bankId}/`)) return 'codex';
+  } catch { /* ignore */ }
+  return 'plugin';
+}
+
+export function createApiRouter(bridge: DirectBridge, logBuffer: LogBuffer, memory: MemoryStore, ai: AIService): Router {
   const router = Router();
+
+  /** Get a session's working directory path (replaces tmux display-message) */
+  function getSessionCwd(sessionId: string): string {
+    const sessions = bridge.getCachedSessions();
+    return sessions.find(s => s.id === sessionId)?.path ?? os.homedir();
+  }
 
   router.get('/version', (_req, res) => {
     res.json({ version: PKG_VERSION });
@@ -41,7 +69,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const entries = await Promise.all(sessions.map(async (s) => {
         try {
           const { stdout: pathOut } = await execAsync(
-            `tmux display-message -t ${sh(s.id)} -p "#{pane_current_path}" 2>/dev/null`
+            `echo ${sh(s.path ?? '')}`
           );
           const cwd = pathOut.trim();
           if (!cwd) return [s.id, null];
@@ -181,7 +209,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json(null);
@@ -221,7 +249,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json(null);
@@ -291,7 +319,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json([]);
@@ -319,7 +347,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.status(400).json({ error: 'No session path' });
@@ -346,7 +374,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json({ root: null });
@@ -363,7 +391,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { mode, base, commit } = req.query as Record<string, string>;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.type('text/plain').send('');
@@ -414,7 +442,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { base, limit = '60' } = req.query as Record<string, string>;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json([]);
@@ -448,13 +476,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
   router.get('/sessions/:id/history', async (req, res) => {
     const sessionId = req.params.id;
     try {
-      const { stdout } = await execAsync(
-        `tmux capture-pane -ep -S - -t ${JSON.stringify(sessionId)} 2>/dev/null`
-      );
-      const lines = stdout.split('\n');
-      let last = lines.length - 1;
-      while (last > 0 && lines[last]!.trim() === '') last--;
-      const text = last >= 0 ? lines.slice(0, last + 1).map(l => l.trimEnd()).join('\r\n') + '\r\n' : '';
+      const text = await bridge.snapshot(sessionId);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(text);
     } catch (e) {
@@ -467,7 +489,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { sessionId } = req.params;
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = pathOut.trim();
       if (!cwd) return res.json({ files: {} });
@@ -507,13 +529,27 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
 
   // ── Notes ───────────────────────────────────────────────────────────────────
 
-  const NOTES_DIR = nodePath.join(os.homedir(), '.vipershell');
-  const NOTES_PATH = nodePath.join(NOTES_DIR, 'notes.md');
+  const NOTES_DIR = nodePath.join(os.homedir(), '.vipershell', 'notes');
+  // Migrate old single-file notes to sheets dir
+  const OLD_NOTES_PATH = nodePath.join(os.homedir(), '.vipershell', 'notes.md');
+  try {
+    if (existsSync(OLD_NOTES_PATH)) {
+      mkdirSync(NOTES_DIR, { recursive: true });
+      const oldContent = readFileSync(OLD_NOTES_PATH, 'utf-8');
+      if (oldContent.trim()) {
+        const dest = nodePath.join(NOTES_DIR, 'notes.md');
+        if (!existsSync(dest)) writeFileSync(dest, oldContent, 'utf-8');
+      }
+      unlinkSync(OLD_NOTES_PATH);
+    }
+  } catch { /* ignore migration errors */ }
 
+  // Backwards compat: old single-file endpoint redirects to default sheet
   router.get('/notes', (_req, res) => {
     try {
-      if (!existsSync(NOTES_PATH)) return res.json({ content: '' });
-      res.json({ content: readFileSync(NOTES_PATH, 'utf-8') });
+      const p = nodePath.join(NOTES_DIR, 'notes.md');
+      if (!existsSync(p)) return res.json({ content: '' });
+      res.json({ content: readFileSync(p, 'utf-8') });
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }
@@ -524,7 +560,61 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const { content } = req.body as { content?: string };
       if (content === undefined) return res.status(400).json({ error: 'Missing content' });
       mkdirSync(NOTES_DIR, { recursive: true });
-      writeFileSync(NOTES_PATH, content, 'utf-8');
+      writeFileSync(nodePath.join(NOTES_DIR, 'notes.md'), content, 'utf-8');
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // List all note sheets
+  router.get('/notes/sheets', (_req, res) => {
+    try {
+      mkdirSync(NOTES_DIR, { recursive: true });
+      const files = readdirSync(NOTES_DIR).filter(f => f.endsWith('.md')).sort();
+      if (files.length === 0) {
+        // Create a default sheet
+        writeFileSync(nodePath.join(NOTES_DIR, 'notes.md'), '', 'utf-8');
+        files.push('notes.md');
+      }
+      res.json({ sheets: files.map(f => f.replace(/\.md$/, '')) });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // Read a sheet
+  router.get('/notes/sheets/:name', (req, res) => {
+    try {
+      const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '');
+      const p = nodePath.join(NOTES_DIR, `${name}.md`);
+      if (!existsSync(p)) return res.json({ content: '' });
+      res.json({ content: readFileSync(p, 'utf-8') });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // Write a sheet
+  router.put('/notes/sheets/:name', (req, res) => {
+    try {
+      const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '');
+      const { content } = req.body as { content?: string };
+      if (content === undefined) return res.status(400).json({ error: 'Missing content' });
+      mkdirSync(NOTES_DIR, { recursive: true });
+      writeFileSync(nodePath.join(NOTES_DIR, `${name}.md`), content, 'utf-8');
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // Delete a sheet
+  router.delete('/notes/sheets/:name', (req, res) => {
+    try {
+      const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '');
+      const p = nodePath.join(NOTES_DIR, `${name}.md`);
+      if (existsSync(p)) unlinkSync(p);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -541,7 +631,7 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const subpath = expandHome((req.query.path as string | undefined) ?? '');
       const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
       const { stdout } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
+        `echo ${sh(getSessionCwd(sessionId))}`
       );
       const cwd = stdout.trim();
       if (!cwd) return res.status(404).json({ error: 'Session not found' });
@@ -572,33 +662,49 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const glob  = (req.query.glob as string | undefined ?? '').trim();
       if (!query) return res.json({ results: [] });
 
-      const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-      const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
-      );
-      const cwd = pathOut.trim();
+      const cwd = getSessionCwd(sessionId);
       if (!cwd) return res.status(404).json({ error: 'Session not found' });
 
-      // Use grep -rni, excluding common noise directories
-      const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache']
-        .map(d => `--exclude-dir=${sh(d)}`).join(' ');
-      const globArg = glob ? `--include=${sh(glob)}` : '';
-      const cmd = `grep -rni --color=never -I ${excludeDirs} ${globArg} -m 500 -- ${sh(query)} . 2>/dev/null | head -500`;
-      const { stdout } = await execAsync(cmd, { cwd, timeout: 10_000 }).catch(() => ({ stdout: '' }));
+      const MAX_RESULTS = 500;
+      const args = [
+        '--json',
+        '--smart-case',
+        '--max-filesize', '1M',
+        '--max-count', String(MAX_RESULTS),
+        ...(glob ? ['-g', glob] : []),
+        '--', query, '.',
+      ];
 
       const results: { file: string; line: number; text: string }[] = [];
-      for (const raw of stdout.split('\n')) {
-        if (!raw) continue;
-        // format: ./path/to/file:lineNum:text
-        const m = raw.match(/^\.\/(.+?):(\d+):(.*)$/);
-        if (m) {
-          results.push({
-            file: m[1]!,
-            line: parseInt(m[2]!, 10),
-            text: m[3]!,
-          });
-        }
-      }
+      await new Promise<void>((resolve) => {
+        const child = spawn(rgPath, args, { cwd });
+        let buf = '';
+        let done = false;
+        const finish = () => { if (!done) { done = true; try { child.kill(); } catch {} resolve(); } };
+        const timer = setTimeout(finish, 10_000);
+
+        child.stdout.on('data', (chunk: Buffer) => {
+          buf += chunk.toString('utf8');
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) !== -1) {
+            const line = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            try {
+              const ev = JSON.parse(line);
+              if (ev.type !== 'match') continue;
+              const file = ev.data.path?.text ?? '';
+              const lineNum = ev.data.line_number ?? 0;
+              const text = ev.data.lines?.text?.replace(/\r?\n$/, '') ?? '';
+              results.push({ file: file.replace(/^\.\//, ''), line: lineNum, text });
+              if (results.length >= MAX_RESULTS) { finish(); return; }
+            } catch { /* skip non-JSON line */ }
+          }
+        });
+        child.on('error', finish);
+        child.on('close', () => { clearTimeout(timer); finish(); });
+      });
+
       res.json({ results, cwd });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -611,19 +717,38 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       const query = (req.query.q as string | undefined ?? '').trim();
       if (!query) return res.json({ results: [] });
 
-      const sh = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-      const { stdout: pathOut } = await execAsync(
-        `tmux display-message -t ${sh(sessionId)} -p "#{pane_current_path}" 2>/dev/null`
-      );
-      const cwd = pathOut.trim();
+      const cwd = getSessionCwd(sessionId);
       if (!cwd) return res.status(404).json({ error: 'Session not found' });
 
-      const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache']
-        .map(d => `-not -path '*/${d}/*'`).join(' ');
-      const cmd = `find . ${excludeDirs} -type f -iname ${sh('*' + query + '*')} 2>/dev/null | head -100`;
-      const { stdout } = await execAsync(cmd, { cwd, timeout: 5000 }).catch(() => ({ stdout: '' }));
+      const MAX_RESULTS = 100;
+      const needle = query.toLowerCase();
+      const args = ['--files', '--hidden', '-g', '!.git'];
 
-      const results = stdout.split('\n').filter(Boolean).map(f => f.replace(/^\.\//, ''));
+      const results: string[] = [];
+      await new Promise<void>((resolve) => {
+        const child = spawn(rgPath, args, { cwd });
+        let buf = '';
+        let done = false;
+        const finish = () => { if (!done) { done = true; try { child.kill(); } catch {} resolve(); } };
+        const timer = setTimeout(finish, 5_000);
+
+        child.stdout.on('data', (chunk: Buffer) => {
+          buf += chunk.toString('utf8');
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) !== -1) {
+            const file = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            if (!file) continue;
+            if (file.toLowerCase().includes(needle)) {
+              results.push(file.replace(/^\.\//, ''));
+              if (results.length >= MAX_RESULTS) { finish(); return; }
+            }
+          }
+        });
+        child.on('error', finish);
+        child.on('close', () => { clearTimeout(timer); finish(); });
+      });
+
       res.json({ results, cwd });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -727,6 +852,92 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
     const subpath = (req.params as Record<string, string>)[0];
     const target = new URL(`${memory.apiUrl}/${subpath}`);
+
+    // Log retain/recall/reflect activity from plugins.
+    // For retain we can log immediately; for recall we log after the response so
+    // we can capture the result preview that was actually sent back to the hook.
+    let pendingRecall: MemoryActivity | null = null;
+    if (req.method === 'POST' && subpath) {
+      const source = _detectPluginSource(req);
+
+      // Try to resolve vipershell session ID from the request context.
+      // The retain body may have metadata.session_id (Claude Code UUID) — we match
+      // it to a vipershell session by finding an isClaudeCode session whose path matches.
+      let vsSessionId: string | undefined;
+      const sessions = bridge.getCachedSessions();
+      const claudeSessions = sessions.filter(s => s.isClaudeCode);
+
+      // Stringify metadata values so the activity log carries simple k/v pairs.
+      const flattenMeta = (m: unknown): Record<string, string> | undefined => {
+        if (!m || typeof m !== 'object') return undefined;
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(m as Record<string, unknown>)) {
+          if (v == null) continue;
+          out[k] = typeof v === 'string' ? v : JSON.stringify(v);
+        }
+        return Object.keys(out).length > 0 ? out : undefined;
+      };
+
+      if (subpath.match(/\/memories$/) && req.body) {
+        // Retain call — POST /banks/{id}/memories
+        const content = typeof req.body.content === 'string' ? req.body.content : JSON.stringify(req.body.content ?? '');
+        const ctx = req.body.context
+          ?? (typeof req.body.content === 'string' ? req.body.content.slice(0, 120) : undefined);
+        // Match by most recently active Claude Code session (retain happens at session end)
+        if (claudeSessions.length === 1) {
+          vsSessionId = claudeSessions[0]!.id;
+        } else if (claudeSessions.length > 1) {
+          // Pick the one with most recent activity
+          vsSessionId = claudeSessions.sort((a, b) => (b.last_activity ?? 0) - (a.last_activity ?? 0))[0]?.id;
+        }
+        const capped = capPayload(content);
+        logMemoryActivity({
+          ts: Date.now(), type: 'retain', source,
+          sessionId: vsSessionId,
+          contentSize: content.length,
+          context: typeof ctx === 'string' ? ctx.slice(0, 120) : undefined,
+          subpath,
+          payload: capped.value,
+          payloadTruncated: capped.truncated,
+          metadata: flattenMeta(req.body.metadata),
+        });
+      } else if (subpath.includes('/recall') && req.body) {
+        // Recall call — attribute to the most recently active Claude Code session
+        if (claudeSessions.length > 0) {
+          vsSessionId = claudeSessions.sort((a, b) => (b.last_activity ?? 0) - (a.last_activity ?? 0))[0]?.id;
+        }
+        const query = typeof req.body.query === 'string'
+          ? req.body.query
+          : typeof req.body.content === 'string'
+            ? req.body.content
+            : '';
+        const capped = capPayload(query);
+        pendingRecall = {
+          ts: Date.now(), type: 'recall', source,
+          sessionId: vsSessionId,
+          context: query.slice(0, 120),
+          subpath,
+          payload: capped.value,
+          payloadTruncated: capped.truncated,
+          metadata: flattenMeta(req.body.metadata),
+        };
+      } else if (subpath.includes('/reflect') && req.body) {
+        if (claudeSessions.length > 0) {
+          vsSessionId = claudeSessions.sort((a, b) => (b.last_activity ?? 0) - (a.last_activity ?? 0))[0]?.id;
+        }
+        const query = typeof req.body.query === 'string' ? req.body.query : '';
+        const capped = capPayload(query);
+        pendingRecall = {
+          ts: Date.now(), type: 'recall', source,
+          sessionId: vsSessionId,
+          context: query.slice(0, 120),
+          subpath,
+          payload: capped.value,
+          payloadTruncated: capped.truncated,
+          metadata: flattenMeta(req.body.metadata),
+        };
+      }
+    }
     if (req.url.includes('?')) target.search = req.url.split('?')[1]!;
 
     // Re-serialize body since express.json() already consumed the stream
@@ -750,7 +961,43 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
       for (const [k, v] of Object.entries(proxyRes.headers)) {
         if (v && k.toLowerCase() !== 'content-encoding') res.setHeader(k, v as string);
       }
-      proxyRes.pipe(res);
+      if (pendingRecall) {
+        // Tee the response: buffer it (capped) so we can extract the result preview
+        // that the hook actually received, while still streaming bytes to the client.
+        const captured = pendingRecall;
+        const chunks: Buffer[] = [];
+        let captured_bytes = 0;
+        const CAP = 64 * 1024; // upper bound on what we buffer for parsing
+        proxyRes.on('data', (chunk: Buffer) => {
+          if (captured_bytes < CAP) {
+            const room = CAP - captured_bytes;
+            chunks.push(chunk.length > room ? chunk.subarray(0, room) : chunk);
+            captured_bytes += Math.min(chunk.length, room);
+          }
+          res.write(chunk);
+        });
+        proxyRes.on('end', () => {
+          res.end();
+          try {
+            const body = Buffer.concat(chunks).toString('utf8');
+            const parsed = JSON.parse(body);
+            const results = Array.isArray(parsed?.results) ? parsed.results : [];
+            captured.resultCount = results.length;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const joined = results.map((r: any) => typeof r?.text === 'string' ? r.text : JSON.stringify(r)).join('\n---\n');
+            const cappedResults = capPayload(joined);
+            captured.resultsPreview = cappedResults.value;
+            captured.resultsPreviewTruncated = cappedResults.truncated;
+          } catch { /* upstream returned non-JSON or partial — leave preview empty */ }
+          logMemoryActivity(captured);
+        });
+        proxyRes.on('error', () => {
+          // Still log what we have, even if upstream errored mid-stream
+          logMemoryActivity(captured);
+        });
+      } else {
+        proxyRes.pipe(res);
+      }
     });
 
     proxyReq.on('error', (e) => {
@@ -765,6 +1012,48 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
   });
 
   // ── Memory config & control ──────────────────────────────────────────────────
+
+  // ── Memory activity + bank stats ──────────────────────────────────────────
+  router.get('/memory/activity', async (_req, res) => {
+    const activity = getMemoryActivity();
+    let bankStats = null;
+    let healthy = false;
+    let bankId = 'vipershell';
+
+    // Read the configured bank ID from plugin config
+    try {
+      const pluginCfg = JSON.parse(readFileSync(nodePath.join(os.homedir(), '.hindsight', 'claude-code.json'), 'utf-8'));
+      if (pluginCfg.bankId) bankId = pluginCfg.bankId;
+    } catch { /* use default */ }
+
+    if (memory.active && memory.apiUrl) {
+      try {
+        const resp = await fetch(`${memory.apiUrl}/v1/default/banks/${encodeURIComponent(bankId)}/stats`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (resp.ok) {
+          bankStats = await resp.json();
+          healthy = true;
+        }
+      } catch { /* hindsight unreachable */ }
+
+      if (!healthy) {
+        try {
+          const resp = await fetch(`${memory.apiUrl}/health`, { signal: AbortSignal.timeout(2000) });
+          healthy = resp.ok;
+        } catch { /* still unhealthy */ }
+      }
+    }
+
+    res.json({
+      enabled: memory.getConfig().hindsightEnabled,
+      active: memory.active,
+      healthy,
+      bankId,
+      bankStats,
+      activity,
+    });
+  });
 
   router.get('/memory/config', async (_req, res) => {
     const cfg = memory.getConfig();
@@ -1154,87 +1443,97 @@ export function createApiRouter(bridge: TmuxBridge, logBuffer: LogBuffer, memory
     }
   });
 
-  // ── Hermes Agent plugin ──────────────────────────────────────────────────
+  // ── Hermes Agent native Hindsight integration ─────────────────────────────
 
-  const HERMES_VENV_PYTHON = nodePath.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'python');
-  const HERMES_CONFIG = nodePath.join(os.homedir(), '.hindsight', 'hermes.json');
+  const HERMES_CONFIG_DIR = nodePath.join(os.homedir(), '.hermes', 'hindsight');
+  const HERMES_CONFIG = nodePath.join(HERMES_CONFIG_DIR, 'config.json');
+  const HERMES_ENV_FILE = nodePath.join(os.homedir(), '.hermes', '.env');
 
   router.get('/memory/hermes-status', async (_req, res) => {
-    const venvExists = existsSync(HERMES_VENV_PYTHON);
-    let pluginInstalled = false;
-    let pluginVersion = '';
-    if (venvExists) {
-      try {
-        const { stdout } = await execAsync(
-          `${HERMES_VENV_PYTHON} -c "import hindsight_hermes; print(hindsight_hermes.__version__)" 2>/dev/null`,
-          { timeout: 5000 }
-        );
-        pluginInstalled = true;
-        pluginVersion = stdout.trim();
-      } catch { /* not installed */ }
-    }
+    // Check if hermes CLI is available
+    let hermesInstalled = false;
+    try {
+      await execAsync('which hermes', { timeout: 3000 });
+      hermesInstalled = true;
+    } catch { /* not found */ }
 
+    // Read native config
     let config: Record<string, unknown> = {};
+    let configured = false;
     try {
       config = JSON.parse(readFileSync(HERMES_CONFIG, 'utf-8'));
+      configured = Boolean(config.api_url || config.mode);
     } catch { /* no config */ }
 
     res.json({
-      hermesInstalled: venvExists,
-      pluginInstalled,
-      pluginVersion,
+      hermesInstalled,
+      configured,
       config,
     });
   });
 
   router.post('/memory/hermes-setup', async (req, res) => {
-    if (!existsSync(HERMES_VENV_PYTHON)) {
-      return res.json({ ok: false, error: 'Hermes Agent not installed (~/.hermes/hermes-agent/venv/ not found). Install Hermes first: pip install hermes-agent' });
-    }
     try {
-      // Install the hindsight-hermes plugin into Hermes's venv
-      const { stdout, stderr } = await execAsync(
-        `uv pip install hindsight-hermes --python ${HERMES_VENV_PYTHON}`,
-        { timeout: 60_000 }
-      );
-
-      // Write config pointing to vipershell's Hindsight proxy
+      // Build proxy URL pointing to vipershell's Hindsight proxy
       const browserHost = req.headers.host?.split(':')[0] ?? '127.0.0.1';
       const port = (req.headers.host?.split(':')[1]) ?? '4445';
       const apiUrl = `http://${browserHost}:${port}/api/hindsight`;
 
+      // Read existing config and merge
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(readFileSync(HERMES_CONFIG, 'utf-8')); } catch { /* fresh */ }
 
       const config = {
         ...existing,
-        hindsightApiUrl: apiUrl,
-        bankId: existing.bankId ?? 'vipershell',
+        mode: 'cloud',
+        api_url: apiUrl,
+        api_key: '',
+        bank_id: existing.bank_id ?? 'vipershell',
         autoRecall: existing.autoRecall ?? true,
         autoRetain: existing.autoRetain ?? true,
         recallBudget: existing.recallBudget ?? 'mid',
         recallMaxTokens: existing.recallMaxTokens ?? 4096,
       };
 
-      mkdirSync(nodePath.dirname(HERMES_CONFIG), { recursive: true });
+      mkdirSync(HERMES_CONFIG_DIR, { recursive: true });
       writeFileSync(HERMES_CONFIG, JSON.stringify(config, null, 2) + '\n');
 
-      res.json({ ok: true, output: stdout + stderr });
+      // Set memory.provider to hindsight via hermes CLI if available
+      try {
+        await execAsync('hermes config set memory.provider hindsight', { timeout: 5000 });
+      } catch {
+        // CLI not available — write env var fallback to ~/.hermes/.env
+        const envPath = HERMES_ENV_FILE;
+        let envContent = '';
+        try { envContent = readFileSync(envPath, 'utf-8'); } catch { /* fresh */ }
+
+        // Update or append HINDSIGHT_API_URL
+        if (envContent.includes('HINDSIGHT_API_URL=')) {
+          envContent = envContent.replace(/^HINDSIGHT_API_URL=.*$/m, `HINDSIGHT_API_URL=${apiUrl}`);
+        } else {
+          envContent += `${envContent && !envContent.endsWith('\n') ? '\n' : ''}HINDSIGHT_API_URL=${apiUrl}\n`;
+        }
+        mkdirSync(nodePath.dirname(envPath), { recursive: true });
+        writeFileSync(envPath, envContent);
+      }
+
+      res.json({ ok: true });
     } catch (e: unknown) {
       const err = e as { message?: string; stderr?: string };
       res.json({ ok: false, error: err.stderr || err.message || String(e) });
     }
   });
 
-  router.post('/memory/hermes-uninstall', async (_req, res) => {
-    if (!existsSync(HERMES_VENV_PYTHON)) {
-      return res.json({ ok: true });
-    }
+  router.post('/memory/hermes-disconnect', async (_req, res) => {
     try {
-      await execAsync(
-        `uv pip uninstall hindsight-hermes --python ${HERMES_VENV_PYTHON}`,
-        { timeout: 30_000 }
-      );
+      // Remove hindsight config
+      try { unlinkSync(HERMES_CONFIG); } catch { /* already gone */ }
+
+      // Unset memory provider via CLI if available
+      try {
+        await execAsync('hermes config set memory.provider none', { timeout: 5000 });
+      } catch { /* CLI not available, config file removal is sufficient */ }
+
       res.json({ ok: true });
     } catch (e: unknown) {
       const err = e as { message?: string };

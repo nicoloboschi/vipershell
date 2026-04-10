@@ -193,7 +193,7 @@ function FileBlock({ file, gitRoot, isFocused }: FileBlockProps) {
   const absPath = gitRoot ? `${gitRoot}/${displayPath}` : null;
 
   return (
-    <div data-file={displayPath} style={{ border: `1px solid ${isFocused ? '#4ADE80' : '#222222'}`, borderRadius: 6, marginBottom: 12, overflow: 'hidden' }}>
+    <div data-file={displayPath} style={{ border: `1px solid ${isFocused ? '#0074d9' : '#222222'}`, borderRadius: 6, marginBottom: 12, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', background: '#111111', borderBottom: (collapsed && !preview) ? 'none' : '1px solid #222222' }}>
         <div onClick={() => setCollapsed(c => !c)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: 'pointer', userSelect: 'none', minWidth: 0 }}>
           {collapsed ? <ChevronRight size={13} color="#525252" style={{ flexShrink: 0 }} /> : <ChevronDown size={13} color="#525252" style={{ flexShrink: 0 }} />}
@@ -262,24 +262,113 @@ interface FileSidebarProps {
 function FileSidebar({ files, focusedIndex, onJump, onSelect, onOpenFile }: FileSidebarProps) {
   const totalAdd = files.reduce((s, f) => s + f.additions, 0);
   const totalDel = files.reduce((s, f) => s + f.deletions, 0);
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  const tree = useMemo(() => buildTree(files), [files]);
 
-  // Group files by directory, sorted alphabetically
-  const grouped = (() => {
-    const map = new Map<string, { file: DiffFile; index: number; name: string }[]>();
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]!;
-      const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
-      const parts = path.split('/');
-      const name = parts.pop()!;
-      const dir = parts.join('/') || '.';
-      if (!map.has(dir)) map.set(dir, []);
-      map.get(dir)!.push({ file, index: i, name });
+  const toggleDir = (dirPath: string) => {
+    setCollapsedDirs(prev => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) next.delete(dirPath); else next.add(dirPath);
+      return next;
+    });
+  };
+
+  function renderFileRow(file: DiffFile, index: number, name: string, depth: number) {
+    const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
+    const isFocused = index === focusedIndex;
+    return (
+      <div
+        key={index}
+        onClick={() => { onSelect(index); onJump(path); }}
+        style={{
+          padding: '4px 10px', paddingLeft: 10 + depth * 12, cursor: 'pointer', borderBottom: '1px solid #111111',
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: isFocused ? '#1f3a56' : 'transparent',
+          borderLeft: isFocused ? '2px solid #0074d9' : '2px solid transparent',
+        }}
+        onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = '#111111'; }}
+        onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = 'transparent'; }}
+      >
+        {file.isNew ? <FilePlus size={11} color="#4ADE80" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={11} color="#F87171" style={{ flexShrink: 0 }} /> : <FileCode size={11} color="#525252" style={{ flexShrink: 0 }} />}
+        <span style={{ fontSize: 11, color: '#F4F4F5', fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1, minWidth: 0, textOverflow: 'ellipsis' }}>
+          {name}
+        </span>
+        <StatBar add={file.additions} del={file.deletions} />
+        {onOpenFile && (
+          <button
+            title="Open in Files tab"
+            onClick={(e) => { e.stopPropagation(); onOpenFile(path); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
+            onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#93C5FD'; }}
+            onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#484f58'; }}
+          >
+            <FolderOpen size={11} />
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  function renderNode(node: TreeNode, dirPath: string, dirLabel: string, depth: number): React.ReactNode {
+    const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const sortedFiles = [...node.files].sort((a, b) => {
+      const aName = (a.file.isDeleted ? a.file.oldPath : a.file.newPath).split('/').pop()!;
+      const bName = (b.file.isDeleted ? b.file.oldPath : b.file.newPath).split('/').pop()!;
+      return aName.localeCompare(bName);
+    });
+
+    // Root: render children and root-level files directly
+    if (depth < 0) {
+      return (
+        <>
+          {sortedChildren.map(([name, child]) => renderNode(child, name, name, 0))}
+          {sortedFiles.map(({ file, index }) => {
+            const fileName = (file.isDeleted ? file.oldPath : file.newPath).split('/').pop()!;
+            return renderFileRow(file, index, fileName, 0);
+          })}
+        </>
+      );
     }
-    // Sort dirs alphabetically, sort files within each dir alphabetically
-    const sorted = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    for (const [, entries] of sorted) entries.sort((a, b) => a.name.localeCompare(b.name));
-    return sorted;
-  })();
+
+    const collapsed = collapsedDirs.has(dirPath);
+
+    return (
+      <div key={dirPath}>
+        <div
+          onClick={() => toggleDir(dirPath)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '4px 10px', paddingLeft: 10 + depth * 12,
+            cursor: 'pointer', userSelect: 'none',
+            borderBottom: '1px solid #111111',
+            background: '#0a0a0a',
+          }}
+          onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = '#111111'; }}
+          onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = '#0a0a0a'; }}
+        >
+          {collapsed
+            ? <ChevronRight size={11} color="#525252" style={{ flexShrink: 0 }} />
+            : <ChevronDown size={11} color="#525252" style={{ flexShrink: 0 }} />}
+          <FolderOpen size={11} color="#737373" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: '#a1a1aa', fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+            {dirLabel}
+          </span>
+          <span style={{ fontSize: 9, color: '#525252', flexShrink: 0 }}>
+            {node.fileCount}
+          </span>
+        </div>
+        {!collapsed && (
+          <>
+            {sortedChildren.map(([name, child]) => renderNode(child, `${dirPath}/${name}`, name, depth + 1))}
+            {sortedFiles.map(({ file, index }) => {
+              const fileName = (file.isDeleted ? file.oldPath : file.newPath).split('/').pop()!;
+              return renderFileRow(file, index, fileName, depth + 1);
+            })}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #222222', overflowY: 'auto', background: '#0c0c0c' }}>
@@ -288,50 +377,7 @@ function FileSidebar({ files, focusedIndex, onJump, onSelect, onOpenFile }: File
         <span style={{ color: '#4ADE80' }}>+{totalAdd}</span>
         <span style={{ color: '#F87171' }}>-{totalDel}</span>
       </div>
-      {grouped.map(([dir, entries]) => (
-        <div key={dir}>
-          <div style={{ padding: '5px 10px 3px', fontSize: 10, color: '#525252', fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#0c0c0c', borderBottom: '1px solid #111111', position: 'sticky', top: 0, zIndex: 1 }}>
-            {dir}
-          </div>
-          {entries.map(({ file, index, name }) => {
-            const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
-            const isFocused = index === focusedIndex;
-            return (
-              <div
-                key={index}
-                onClick={() => { onSelect(index); onJump(path); }}
-                style={{
-                  padding: '4px 10px 4px 18px', cursor: 'pointer', borderBottom: '1px solid #111111',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: isFocused ? '#1f3a56' : 'transparent',
-                  borderLeft: isFocused ? '2px solid #4ADE80' : '2px solid transparent',
-                }}
-                onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = '#111111'; }}
-                onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { if (!isFocused) e.currentTarget.style.background = 'transparent'; }}
-              >
-                {file.isNew ? <FilePlus size={11} color="#4ADE80" style={{ flexShrink: 0 }} /> : file.isDeleted ? <FileMinus size={11} color="#F87171" style={{ flexShrink: 0 }} /> : <FileCode size={11} color="#525252" style={{ flexShrink: 0 }} />}
-                <span style={{ fontSize: 12, color: '#F4F4F5', fontFamily: '"JetBrains Mono",monospace', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1, minWidth: 0, direction: 'rtl', textOverflow: 'ellipsis', textAlign: 'left' }}>
-                  <bdi>{name}</bdi>
-                </span>
-                <span title={`${file.additions} addition${file.additions !== 1 ? 's' : ''}, ${file.deletions} deletion${file.deletions !== 1 ? 's' : ''}`}>
-                  <StatBar add={file.additions} del={file.deletions} />
-                </span>
-                {onOpenFile && (
-                  <button
-                    title="Open in Files tab"
-                    onClick={(e) => { e.stopPropagation(); onOpenFile(path); }}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#484f58', flexShrink: 0, display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#93C5FD'; }}
-                    onMouseLeave={(e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.color = '#484f58'; }}
-                  >
-                    <FolderOpen size={11} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+      {renderNode(tree, '', '', -1)}
     </div>
   );
 }
@@ -445,6 +491,61 @@ function FullLog({ sessionId }: { sessionId: string }) {
       ))}
     </div>
   );
+}
+
+// ── Directory tree for sidebar ───────────────────────────────────────────────
+
+interface TreeNode {
+  files: { file: DiffFile; index: number }[];
+  children: Map<string, TreeNode>;
+  additions: number;
+  deletions: number;
+  fileCount: number;
+}
+
+function buildTree(files: DiffFile[]): TreeNode {
+  const root: TreeNode = { files: [], children: new Map(), additions: 0, deletions: 0, fileCount: 0 };
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]!;
+    const path = file.isDeleted ? file.oldPath : (file.newPath || file.oldPath);
+    const parts = path.split('/');
+    parts.pop(); // remove filename
+    let node = root;
+    for (const part of parts) {
+      if (!node.children.has(part)) {
+        node.children.set(part, { files: [], children: new Map(), additions: 0, deletions: 0, fileCount: 0 });
+      }
+      node = node.children.get(part)!;
+    }
+    node.files.push({ file, index: i });
+  }
+  function calcStats(node: TreeNode): void {
+    node.additions = node.files.reduce((s, e) => s + e.file.additions, 0);
+    node.deletions = node.files.reduce((s, e) => s + e.file.deletions, 0);
+    node.fileCount = node.files.length;
+    for (const child of node.children.values()) {
+      calcStats(child);
+      node.additions += child.additions;
+      node.deletions += child.deletions;
+      node.fileCount += child.fileCount;
+    }
+  }
+  calcStats(root);
+  // Collapse single-child directories without files (src/components → src/components)
+  function collapse(node: TreeNode): TreeNode {
+    const newChildren = new Map<string, TreeNode>();
+    for (const [name, child] of [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const collapsed = collapse(child);
+      if (collapsed.files.length === 0 && collapsed.children.size === 1) {
+        const [subName, subChild] = [...collapsed.children.entries()][0]!;
+        newChildren.set(`${name}/${subName}`, subChild);
+      } else {
+        newChildren.set(name, collapsed);
+      }
+    }
+    return { ...node, children: newChildren };
+  }
+  return collapse(root);
 }
 
 // ── Root ─────────────────────────────────────────────────────────────────────
@@ -665,7 +766,7 @@ export default function GitDiffPane({ sessionId, onOpenFile }: GitDiffPaneProps)
                 if (e.key === 'Enter') { setEditingBase(false); setBase(draftBase); }
                 if (e.key === 'Escape') { setEditingBase(false); setDraftBase(base); }
               }}
-              style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, border: '1px solid #4ADE80', background: '#0c0c0c', color: '#d4d4d8', outline: 'none', width: 80, fontFamily: 'inherit' }}
+              style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, border: '1px solid #0074d9', background: '#0c0c0c', color: '#d4d4d8', outline: 'none', width: 80, fontFamily: 'inherit' }}
             />
           ) : (
             <button

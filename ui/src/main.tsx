@@ -10,6 +10,19 @@ import ConnectScreen from './components/ConnectScreen';
 initServerUrl();
 installFetchInterceptor();
 
+// Swallow xterm.js's benign async renderer race:
+// "Cannot read properties of undefined (reading 'dimensions')"
+// This fires when xterm's Viewport schedules a refresh before its
+// renderer is fully initialized. The error is harmless — the terminal
+// recovers on the next render cycle.
+window.addEventListener('error', (e) => {
+  if (e.message?.includes("reading 'dimensions'") || e.error?.message?.includes("reading 'dimensions'")) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return false;
+  }
+}, true);
+
 function Root() {
   const [connected, setConnected] = useState(!needsConnect());
 

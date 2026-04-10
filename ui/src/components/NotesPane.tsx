@@ -1,114 +1,288 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Plus, X, FileText } from 'lucide-react';
+import {
+  MDXEditor,
+  headingsPlugin,
+  listsPlugin,
+  quotePlugin,
+  thematicBreakPlugin,
+  linkPlugin,
+  linkDialogPlugin,
+  tablePlugin,
+  codeBlockPlugin,
+  markdownShortcutPlugin,
+  toolbarPlugin,
+  BoldItalicUnderlineToggles,
+  BlockTypeSelect,
+  CreateLink,
+  InsertTable,
+  InsertThematicBreak,
+  ListsToggle,
+  CodeToggle,
+  type MDXEditorMethods,
+} from '@mdxeditor/editor';
+import '@mdxeditor/editor/style.css';
+import '../mdxeditor-dark.css';
 
 export default function NotesPane(): JSX.Element {
+  const [sheets, setSheets] = useState<string[]>([]);
+  const [activeSheet, setActiveSheet] = useState<string | null>(null);
   const [content, setContent] = useState<string | null>(null);
-  const [saving, setSaving]   = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<MDXEditorMethods | null>(null);
+  const renameRef = useRef<HTMLInputElement | null>(null);
+  const contentRef = useRef<string>('');
 
-  // Load notes on mount
+  // Load sheet list
   useEffect(() => {
-    fetch('/api/notes')
+    fetch('/api/notes/sheets')
       .then(r => r.json())
-      .then(d => setContent(d.content ?? ''))
-      .catch(() => setContent(''));
-  }, []);
+      .then((d: { sheets: string[] }) => {
+        setSheets(d.sheets);
+        if (d.sheets.length > 0 && !activeSheet) {
+          const saved = localStorage.getItem('vipershell:active-note-sheet');
+          setActiveSheet(d.sheets.includes(saved ?? '') ? saved! : d.sheets[0]!);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load active sheet content
+  useEffect(() => {
+    if (!activeSheet) return;
+    setContent(null);
+    localStorage.setItem('vipershell:active-note-sheet', activeSheet);
+    fetch(`/api/notes/sheets/${encodeURIComponent(activeSheet)}`)
+      .then(r => r.json())
+      .then((d: { content: string }) => {
+        const c = d.content ?? '';
+        setContent(c);
+        contentRef.current = c;
+        // Reset MDXEditor content when switching sheets
+        editorRef.current?.setMarkdown(c);
+      })
+      .catch(() => {
+        setContent('');
+        contentRef.current = '';
+      });
+  }, [activeSheet]);
 
   const save = useCallback((text: string) => {
+    if (!activeSheet) return;
     setSaving(true);
-    fetch('/api/notes', {
+    fetch(`/api/notes/sheets/${encodeURIComponent(activeSheet)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: text }),
     })
       .then(() => setSaving(false))
       .catch(() => setSaving(false));
-  }, []);
+  }, [activeSheet]);
 
-  // Let Cmd+ArrowUp/Down reach the window handler for session switching
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      e.preventDefault();
-      e.currentTarget.blur();
-      window.dispatchEvent(new KeyboardEvent('keydown', {
-        key: e.key, metaKey: true, bubbles: true,
-      }));
-    }
-  }, []);
-
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    setContent(text);
+  const handleChange = useCallback((md: string) => {
+    contentRef.current = md;
+    setContent(md);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => save(text), 500);
+    timerRef.current = setTimeout(() => save(md), 500);
   }, [save]);
-
-  // Focus textarea and place cursor at end when content loads
-  useEffect(() => {
-    if (content !== null && textareaRef.current) {
-      const el = textareaRef.current;
-      el.focus();
-      el.selectionStart = el.selectionEnd = el.value.length;
-    }
-  }, [content !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save on unmount if pending
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
-        // Sync save the current content
-        const el = textareaRef.current;
-        if (el) {
-          navigator.sendBeacon?.('/api/notes', new Blob(
-            [JSON.stringify({ content: el.value })],
+        if (activeSheet) {
+          navigator.sendBeacon?.(`/api/notes/sheets/${encodeURIComponent(activeSheet)}`, new Blob(
+            [JSON.stringify({ content: contentRef.current })],
             { type: 'application/json' }
           ));
         }
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSheet]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (content === null) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
-        Loading...
-      </div>
-    );
-  }
+  const addSheet = () => {
+    const base = 'untitled';
+    let name = base;
+    let i = 2;
+    while (sheets.includes(name)) name = `${base}-${i++}`;
+    fetch(`/api/notes/sheets/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '' }),
+    }).then(() => {
+      setSheets(prev => [...prev, name]);
+      setActiveSheet(name);
+    });
+  };
+
+  const deleteSheet = (name: string) => {
+    fetch(`/api/notes/sheets/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      .then(() => {
+        setSheets(prev => {
+          const next = prev.filter(s => s !== name);
+          if (activeSheet === name) {
+            setActiveSheet(next.length > 0 ? next[0]! : null);
+          }
+          return next;
+        });
+      });
+  };
+
+  const startRename = (name: string) => {
+    setRenaming(name);
+    setRenameValue(name);
+    setTimeout(() => renameRef.current?.select(), 50);
+  };
+
+  const commitRename = () => {
+    if (!renaming) return;
+    const trimmed = renameValue.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+    setRenaming(null);
+    if (!trimmed || trimmed === renaming || sheets.includes(trimmed)) return;
+    fetch(`/api/notes/sheets/${encodeURIComponent(renaming)}`)
+      .then(r => r.json())
+      .then((d: { content: string }) => {
+        return fetch(`/api/notes/sheets/${encodeURIComponent(trimmed)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: d.content ?? '' }),
+        });
+      })
+      .then(() => fetch(`/api/notes/sheets/${encodeURIComponent(renaming)}`, { method: 'DELETE' }))
+      .then(() => {
+        setSheets(prev => prev.map(s => s === renaming ? trimmed : s));
+        if (activeSheet === renaming) setActiveSheet(trimmed);
+      });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0c0c0c' }}>
+      {/* Tab bar */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 12px', borderBottom: '1px solid var(--border)',
-        fontSize: 11, color: 'var(--muted-foreground)',
+        display: 'flex', alignItems: 'center', gap: 0,
+        borderBottom: '1px solid var(--border)',
+        background: '#111111',
+        overflowX: 'auto',
+        flexShrink: 0,
       }}>
-        <span>~/.vipershell/notes.md</span>
-        {saving && <span>Saving...</span>}
+        {sheets.map(name => (
+          <div
+            key={name}
+            onClick={() => setActiveSheet(name)}
+            onDoubleClick={() => startRename(name)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '5px 10px',
+              fontSize: 11,
+              fontFamily: '"JetBrains Mono", monospace',
+              cursor: 'pointer',
+              color: activeSheet === name ? 'var(--foreground)' : 'var(--muted-foreground)',
+              background: activeSheet === name
+                ? 'linear-gradient(135deg, #0074d9 0%, #009296 100%) bottom / 100% 2px no-repeat, #0c0c0c'
+                : 'transparent',
+              borderBottom: '2px solid transparent',
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+            }}
+          >
+            <FileText size={10} style={{ flexShrink: 0, opacity: 0.5 }} />
+            {renaming === name ? (
+              <input
+                ref={renameRef}
+                value={renameValue}
+                onChange={e => setRenameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setRenaming(null);
+                }}
+                onClick={e => e.stopPropagation()}
+                style={{
+                  width: 80, fontSize: 11, background: 'var(--input)',
+                  border: '1px solid var(--ring)', borderRadius: 3,
+                  padding: '0 4px', color: 'var(--foreground)',
+                  fontFamily: 'inherit', outline: 'none',
+                }}
+              />
+            ) : (
+              <span>{name}</span>
+            )}
+            {sheets.length > 1 && activeSheet === name && (
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteSheet(name); }}
+                style={{
+                  display: 'flex', alignItems: 'center',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted-foreground)', padding: 0,
+                }}
+                title="Delete sheet"
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          onClick={addSheet}
+          style={{
+            display: 'flex', alignItems: 'center',
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--muted-foreground)', padding: '5px 8px',
+          }}
+          title="New sheet"
+        >
+          <Plus size={12} />
+        </button>
+
+        <div style={{ flex: 1 }} />
+        {saving && <span style={{ fontSize: 10, color: 'var(--muted-foreground)', marginRight: 8 }}>Saving...</span>}
       </div>
-      <textarea
-        ref={textareaRef}
-        value={content}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        spellCheck={false}
-        style={{
-          flex: 1,
-          resize: 'none',
-          background: '#0c0c0c',
-          color: '#d4d4d8',
-          border: 'none',
-          outline: 'none',
-          padding: '12px 16px',
-          fontFamily: '"JetBrains Mono", monospace',
-          fontSize: 14,
-          lineHeight: 1.6,
-          tabSize: 2,
-          minHeight: 0,
-        }}
-        placeholder="Write your notes here..."
-      />
+
+      {/* Editor */}
+      {content === null ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)' }}>
+          Loading...
+        </div>
+      ) : (
+        <div className="notes-editor-wrapper dark-theme" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <MDXEditor
+            ref={editorRef}
+            key={activeSheet}
+            className="dark-theme"
+            markdown={content}
+            onChange={handleChange}
+            contentEditableClassName="notes-editable"
+            plugins={[
+              headingsPlugin(),
+              listsPlugin(),
+              quotePlugin(),
+              thematicBreakPlugin(),
+              linkPlugin(),
+              linkDialogPlugin(),
+              tablePlugin(),
+              codeBlockPlugin({ defaultCodeBlockLanguage: '' }),
+              markdownShortcutPlugin(),
+              toolbarPlugin({
+                toolbarContents: () => (
+                  <>
+                    <BlockTypeSelect />
+                    <BoldItalicUnderlineToggles />
+                    <CodeToggle />
+                    <ListsToggle />
+                    <CreateLink />
+                    <InsertTable />
+                    <InsertThematicBreak />
+                  </>
+                ),
+              }),
+            ]}
+          />
+        </div>
+      )}
     </div>
   );
 }

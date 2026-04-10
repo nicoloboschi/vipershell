@@ -1,69 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
-import { Trash2, SquareTerminal, GitBranch, FolderOpen, Search, ChevronDown, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Minus, RefreshCw, List } from 'lucide-react';
-import useStore, { refreshAllTerminals, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry } from '../store';
-import StatChips from './StatChips';
-import ClaudeIcon from './ClaudeIcon';
-import OpenAIIcon from './OpenAIIcon';
+import { useState } from 'react';
+import { SquareTerminal, GitBranch, FolderOpen, Search, SplitSquareHorizontal, SplitSquareVertical, Grid2x2, Columns3, Minus, Plus, RefreshCw, List, RotateCw } from 'lucide-react';
+import { refreshAllTerminals, activeTerminalScrollToLine, getCommandHistory, clearCommandHistory, type CommandEntry, DEFAULT_FONT_SIZE } from '../store';
+import useStore from '../store';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { NOTES_SESSION_ID } from './PaneTerminal';
 import type { Layout } from './TerminalGrid';
 
-/** Append U+FE0E (text presentation selector) to characters that browsers render as emoji */
-const forceTextPresentation = (s: string) =>
-  s.replace(/[\u2022-\u3299\u{1F000}-\u{1FAFF}]/gu, m => m + '\uFE0E');
-
 interface SessionStatsBarProps {
   sessionId: string | null;
-  send: (msg: Record<string, unknown>) => void;
   activeTab: string;
   onTabChange?: ((tab: string) => void) | null;
-  onConnect?: (id: string) => void;
   layout?: Layout;
   onLayoutChange?: (layout: Layout) => void;
 }
 
-export default function SessionStatsBar({ sessionId, send, activeTab, onTabChange, onConnect, layout, onLayoutChange }: SessionStatsBarProps) {
-  const sessionMap   = useStore(s => s.sessionMap);
-  const showConfirm  = useStore(s => s.showConfirm);
-  const lastCommand  = useStore(s => sessionId ? (s.sessionLastCommand[sessionId] ?? null) : null);
-  const [editing, setEditing]     = useState(false);
-  const [draftName, setDraftName] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-
-  useEffect(() => { setEditing(false); }, [sessionId]);
+export default function SessionStatsBar({ sessionId, activeTab, onTabChange, layout, onLayoutChange }: SessionStatsBarProps) {
+  // `sessionId` here is the active workspace id — zoom is keyed per workspace.
+  const sessionZoom  = useStore(s => sessionId ? s.workspaceZooms[sessionId] : undefined);
+  const adjustSessionZoom = useStore(s => s.adjustSessionZoom);
+  const resetSessionZoom  = useStore(s => s.resetSessionZoom);
 
   if (!sessionId || sessionId === NOTES_SESSION_ID) return null;
-  const session = sessionMap[sessionId];
-
-  function startEdit() {
-    setDraftName(session?.name ?? '');
-    setEditing(true);
-  }
-
-  async function commitRename() {
-    setEditing(false);
-    const trimmed = draftName.trim();
-    if (!trimmed || trimmed === session?.name) return;
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId!)}/rename`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmed }),
-    });
-  }
-
-  const handleClose = async () => {
-    const name = session?.name ?? 'session';
-    const confirmed = await showConfirm(`Close session "${name}"?`);
-    if (confirmed) {
-      const prevId = useStore.getState().navigateSession('up');
-      if (prevId && prevId !== sessionId && onConnect) onConnect(prevId);
-      send({ type: 'close_session', session_id: sessionId });
-    }
-  };
 
   const tabs = onTabChange ? [
     { id: 'terminal', icon: <SquareTerminal size={11} />, label: 'Terminal' },
@@ -97,6 +54,39 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
     </div>
   );
 
+  // All four three-variants are considered the same "button" in the picker —
+  // the cycle order lets the user click the same Columns3 icon repeatedly to
+  // rotate: left → right → top → bottom → left. The icon rotates too so
+  // the current orientation is visible at a glance.
+  const THREE_CYCLE: Layout[] = ['three', 'three-right', 'three-bottom', 'three-top'];
+  const isThree = layout === 'three' || layout === 'three-right' || layout === 'three-top' || layout === 'three-bottom';
+  const threeButtonIcon = (() => {
+    // Columns3 is sideways by default (three vertical columns). Rotate it
+    // so it visually matches the current orientation.
+    const rot =
+      layout === 'three'         ? 0   // tall on left — matches icon's natural orientation closest
+      : layout === 'three-right' ? 180
+      : layout === 'three-top'   ? -90
+      : layout === 'three-bottom'?  90
+      : 0;
+    return <Columns3 size={13} style={{ transform: `rotate(${rot}deg)`, transition: 'transform 0.15s' }} />;
+  })();
+  const threeButtonTitle = isThree
+    ? `3 panes — ${
+        layout === 'three'         ? 'tall left'
+      : layout === 'three-right'   ? 'tall right'
+      : layout === 'three-top'     ? 'wide top'
+      : /* three-bottom */            'wide bottom'
+      } (click to rotate)`
+    : '3 panes (1 + 2)';
+  const handleThreeClick = () => {
+    if (!onLayoutChange) return;
+    if (!isThree) { onLayoutChange('three'); return; }
+    const idx = THREE_CYCLE.indexOf(layout as Layout);
+    const next = THREE_CYCLE[(idx + 1) % THREE_CYCLE.length] ?? 'three';
+    onLayoutChange(next);
+  };
+
   const layoutButtons = onLayoutChange && layout && (
     <div
       className="flex items-center shrink-0"
@@ -106,7 +96,6 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
         { l: 'single' as Layout, icon: <Minus size={13} />, title: 'Single' },
         { l: 'horizontal' as Layout, icon: <SplitSquareHorizontal size={13} />, title: 'Split horizontal' },
         { l: 'vertical' as Layout, icon: <SplitSquareVertical size={13} />, title: 'Split vertical' },
-        { l: 'quad' as Layout, icon: <Grid2x2 size={13} />, title: '2\u00d72 grid' },
       ] as const).map(({ l, icon, title }) => (
         <button
           key={l}
@@ -115,7 +104,7 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           style={{
             display: 'flex', alignItems: 'center', padding: '2px 5px',
             background: layout === l ? 'var(--accent)' : 'none',
-            border: 'none', borderRight: l !== 'quad' ? '1px solid var(--border)' : 'none',
+            border: 'none', borderRight: '1px solid var(--border)',
             cursor: 'pointer',
             color: layout === l ? 'var(--foreground)' : 'var(--muted-foreground)',
           }}
@@ -123,139 +112,109 @@ export default function SessionStatsBar({ sessionId, send, activeTab, onTabChang
           {icon}
         </button>
       ))}
+      {/* Three-pane button: click to set 'three'; when already in a three
+          variant, click rotates to the next orientation. */}
+      <button
+        title={threeButtonTitle}
+        onClick={handleThreeClick}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 3, padding: '2px 5px',
+          background: isThree ? 'var(--accent)' : 'none',
+          border: 'none', borderRight: '1px solid var(--border)',
+          cursor: 'pointer',
+          color: isThree ? 'var(--foreground)' : 'var(--muted-foreground)',
+        }}
+      >
+        {threeButtonIcon}
+        {isThree && <RotateCw size={9} style={{ opacity: 0.5 }} />}
+      </button>
+      <button
+        title="2\u00d72 grid"
+        onClick={() => onLayoutChange('quad')}
+        style={{
+          display: 'flex', alignItems: 'center', padding: '2px 5px',
+          background: layout === 'quad' ? 'var(--accent)' : 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: layout === 'quad' ? 'var(--foreground)' : 'var(--muted-foreground)',
+        }}
+      >
+        <Grid2x2 size={13} />
+      </button>
     </div>
   );
 
-  const sessionNameDropdown = (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          className="status-text"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            background: 'none', border: 'none', cursor: 'pointer',
-            padding: '2px 6px', borderRadius: 4,
-            color: 'var(--foreground)', fontSize: 'inherit',
-            fontFamily: 'inherit',
-          }}
-          title="Session info"
-        >
-          {session?.isClaudeCode ? <ClaudeIcon size={14} /> : session?.isCodex ? <OpenAIIcon size={14} /> : <SquareTerminal size={14} style={{ opacity: 0.5 }} />}
-          <span style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {forceTextPresentation(session?.name ?? '')}
-          </span>
-          <ChevronDown size={10} style={{ opacity: 0.4, flexShrink: 0 }} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="bottom" align="start">
-        <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {/* Rename */}
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, opacity: 0.6 }}>
-              Session name
-            </div>
-            {editing ? (
-              <input
-                ref={inputRef}
-                value={draftName}
-                onChange={e => setDraftName(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-                  if (e.key === 'Escape') setEditing(false);
-                }}
-                style={{
-                  fontSize: 12, color: 'var(--foreground)', background: 'var(--input)',
-                  border: '1px solid var(--ring)', borderRadius: 4, padding: '3px 8px',
-                  outline: 'none', fontFamily: 'inherit', width: '100%',
-                }}
-              />
-            ) : (
-              <button
-                onClick={startEdit}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  fontSize: 12, color: 'var(--foreground)', background: 'none',
-                  border: '1px solid transparent', borderRadius: 4, padding: '3px 8px',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-                className="hover:bg-white/5"
-                title="Click to rename"
-              >
-                {forceTextPresentation(session?.name ?? '')}
-              </button>
-            )}
-          </div>
-          {/* Last command */}
-          {lastCommand && (
-            <div style={{ padding: '8px 12px' }}>
-              <div style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, opacity: 0.6 }}>
-                Last command
-              </div>
-              <div style={{
-                fontSize: 11, color: 'var(--foreground)',
-                fontFamily: '"JetBrains Mono",monospace',
-                opacity: 0.8, wordBreak: 'break-all',
-                maxHeight: 80, overflow: 'auto',
-              }}>
-                {lastCommand}
-              </div>
-            </div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+  const currentZoom = sessionZoom ?? DEFAULT_FONT_SIZE();
+  const zoomButtons = sessionId && (
+    <div
+      className="flex items-center shrink-0"
+      style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}
+    >
+      <button
+        title="Zoom out (\u2318-)"
+        onClick={() => adjustSessionZoom(sessionId, -1)}
+        style={{
+          display: 'flex', alignItems: 'center', padding: '2px 5px',
+          background: 'none', border: 'none',
+          borderRight: '1px solid var(--border)',
+          cursor: 'pointer', color: 'var(--muted-foreground)',
+        }}
+      >
+        <Minus size={13} />
+      </button>
+      <button
+        title={`Font size ${currentZoom}px — click to reset (\u23180)`}
+        onClick={() => resetSessionZoom(sessionId)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          minWidth: 28, padding: '2px 4px',
+          background: 'none', border: 'none',
+          borderRight: '1px solid var(--border)',
+          cursor: 'pointer', color: 'var(--muted-foreground)',
+          fontSize: 10, fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {currentZoom}
+      </button>
+      <button
+        title="Zoom in (\u2318+)"
+        onClick={() => adjustSessionZoom(sessionId, 1)}
+        style={{
+          display: 'flex', alignItems: 'center', padding: '2px 5px',
+          background: 'none', border: 'none',
+          cursor: 'pointer', color: 'var(--muted-foreground)',
+        }}
+      >
+        <Plus size={13} />
+      </button>
+    </div>
   );
 
   return (
     <>
-      {/* Desktop: 2 rows */}
-      <div className="hidden md:flex flex-col shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
-        {/* Row 1: session identity + stats */}
-        <div className="flex items-center gap-1.5 px-4 py-1.5">
-          {sessionNameDropdown}
-          <StatChips sessionId={sessionId} send={send} />
-          <div className="flex-1" />
+      {/* Desktop: single row — grid-level toolbar only (session identity,
+          path, stats, and close moved into per-pane headers). */}
+      <div
+        className="hidden md:flex items-center gap-2 px-4 py-1.5 shrink-0 border-b"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        {layoutButtons && <div>{layoutButtons}</div>}
+        {activeTab === 'terminal' && zoomButtons && <div>{zoomButtons}</div>}
+        <div className="flex-1" />
+        {activeTab === 'terminal' && sessionId && (
+          <CommandHistoryButton sessionId={sessionId} />
+        )}
+        {activeTab === 'terminal' && (
           <button
-            title="Close session"
-            onClick={handleClose}
-            className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-white/5"
+            title="Refresh all terminals"
+            onClick={() => refreshAllTerminals()}
+            className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5"
             style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
           >
-            <Trash2 size={13} />
+            <RefreshCw size={12} />
           </button>
-        </div>
-        {/* Row 2: layout switcher + tab bar */}
-        <div
-          className="flex items-center gap-2 px-4 py-1.5"
-          style={{ borderTop: '1px solid var(--border)' }}
-        >
-          {session?.path && (
-            <span
-              className="text-muted-foreground"
-              style={{ fontSize: 10, fontFamily: '"JetBrains Mono",monospace', opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200, flexShrink: 0 }}
-              title={session.path}
-            >
-              {session.path.replace(/^\/Users\/[^/]+/, '~')}
-            </span>
-          )}
-          {layoutButtons && <div>{layoutButtons}</div>}
-          <div className="flex-1" />
-          {activeTab === 'terminal' && sessionId && (
-            <CommandHistoryButton sessionId={sessionId} />
-          )}
-          {activeTab === 'terminal' && (
-            <button
-              title="Refresh all terminals"
-              onClick={() => refreshAllTerminals()}
-              className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}
-            >
-              <RefreshCw size={12} />
-            </button>
-          )}
-          {tabBar && <div>{tabBar}</div>}
-        </div>
+        )}
+        {tabBar && <div>{tabBar}</div>}
       </div>
 
       {/* Mobile: tab bar only */}

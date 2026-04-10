@@ -120,16 +120,15 @@ interface StatWidgetProps {
 }
 
 function StatWidget({ label, value, unit, history, color }: StatWidgetProps): React.ReactElement {
+  // Inline single-row layout: [LABEL] [value] [sparkline]
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 34 }}>
-        <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
-          {label}
-        </span>
-        <span style={{ fontSize: 11, color, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, lineHeight: 1 }}>
-          {value}{unit}
-        </span>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, lineHeight: 1 }}>
+      <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.65 }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 10, color, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+        {value}{unit}
+      </span>
       <Sparkline data={history} color={color} />
     </div>
   );
@@ -603,61 +602,54 @@ function GitChip({ sessionId, send }: GitChipProps): React.ReactElement | null {
   const extraCount = Math.max(0, prUrls.length - 1);
 
   return (
-    <>
-      {SEP}
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
-              borderRadius: 4,
-            }}
-            className="hover:bg-white/5"
-            title="Git info"
-          >
-            <span style={{ fontSize: 9, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1, opacity: 0.65 }}>
-              GIT
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3, lineHeight: 1 }}>
-              <GitBranch size={9} style={{ color: branchColor, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: branchColor, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
-                {git.branch}
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          style={{
+            display: 'flex', alignItems: 'center', gap: 3,
+            background: 'none', border: 'none', cursor: 'pointer',
+            padding: '1px 4px', borderRadius: 4,
+            lineHeight: 1,
+          }}
+          className="hover:bg-white/5"
+          title="Git info"
+        >
+          <GitBranch size={10} style={{ color: branchColor, flexShrink: 0 }} />
+          <span style={{ fontSize: 10, color: branchColor, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
+            {git.branch}
+          </span>
+          {git.dirty && <span style={{ fontSize: 8, color: '#FACC15', fontWeight: 700 }}>{'\u25CF'}</span>}
+          {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#4ADE80' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
+          {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#F87171' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
+          {topPr && topPr.num > 0 && (() => {
+            const prState = github?.prState;
+            const prColor = prState === 'MERGED' ? '#C084FC' : prState === 'CLOSED' ? '#F87171' : '#4ADE80';
+            const checks = github?.prChecks;
+            const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : checks === 'PENDING' ? Clock : null;
+            const checkColor = checks === 'PASS' ? '#4ADE80' : checks === 'FAIL' ? '#F87171' : '#FACC15';
+            return (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: prColor }}>
+                <GitPullRequest size={8} strokeWidth={2} />#{topPr.num}
+                {CheckIcon && <CheckIcon size={7} strokeWidth={2.5} style={{ color: checkColor }} />}
+                {extraCount > 0 && (
+                  <span style={{ fontSize: 8, opacity: 0.7 }}>+{extraCount}</span>
+                )}
               </span>
-              {git.dirty && <span style={{ fontSize: 8, color: '#FACC15', fontWeight: 700 }}>{'\u25CF'}</span>}
-              {git.ahead  > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#4ADE80' }}><ArrowUp size={8} strokeWidth={2.5} />{git.ahead}</span>}
-              {git.behind > 0 && <span style={{ display: 'flex', alignItems: 'center', fontSize: 9, color: '#F87171' }}><ArrowDown size={8} strokeWidth={2.5} />{git.behind}</span>}
-              {topPr && topPr.num > 0 && (() => {
-                const prState = github?.prState;
-                const prColor = prState === 'MERGED' ? '#C084FC' : prState === 'CLOSED' ? '#F87171' : '#4ADE80';
-                const checks = github?.prChecks;
-                const CheckIcon = checks === 'PASS' ? CircleCheck : checks === 'FAIL' ? CircleX : checks === 'PENDING' ? Clock : null;
-                const checkColor = checks === 'PASS' ? '#4ADE80' : checks === 'FAIL' ? '#F87171' : '#FACC15';
-                return (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 9, color: prColor }}>
-                    <GitPullRequest size={8} strokeWidth={2} />#{topPr.num}
-                    {CheckIcon && <CheckIcon size={7} strokeWidth={2.5} style={{ color: checkColor }} />}
-                    {extraCount > 0 && (
-                      <span style={{ fontSize: 8, opacity: 0.7 }}>+{extraCount}</span>
-                    )}
-                  </span>
-                );
-              })()}
-            </span>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent side="bottom" align="end">
-          <GitDetails git={git} github={github} sessionId={sessionId} send={send} prUrls={prUrls} />
-        </PopoverContent>
-      </Popover>
-    </>
+            );
+          })()}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end">
+        <GitDetails git={git} github={github} sessionId={sessionId} send={send} prUrls={prUrls} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
 // ── Separator ─────────────────────────────────────────────────────────────────
 
 const SEP: JSX.Element = (
-  <div style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 8px', opacity: 0.5, flexShrink: 0 }} />
+  <div style={{ width: 1, height: 12, background: 'var(--border)', margin: '0 6px', opacity: 0.5, flexShrink: 0 }} />
 );
 
 // ── StatChips ─────────────────────────────────────────────────────────────────
@@ -680,19 +672,30 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
     setMemH([]);
   }, [sessionId]);
 
+  // Per-pane totals from the pane's child processes (not system-wide).
+  // `ps pcpu` is % of a single core so sum can exceed 100 on busy multi-core work.
+  const processes: StatsProcess[] | null = stats?.processes ?? null;
+  const paneCpu: number = processes ? processes.reduce((s, p) => s + p.cpu_percent, 0) : 0;
+  const paneMemMb: number = processes ? processes.reduce((s, p) => s + p.mem_mb, 0) : 0;
+
   useEffect(() => {
     if (!stats) return;
-    setCpuH(h => [...h.slice(-(HISTORY - 1)), stats.cpu_percent]);
-    setMemH(h => [...h.slice(-(HISTORY - 1)), stats.mem_percent]);
-  }, [stats]);
+    // Sparkline scale: CPU clamps at 100% (displayed value can still show higher);
+    // memory is normalized against 1 GB so the trend is readable for shell panes.
+    setCpuH(h => [...h.slice(-(HISTORY - 1)), Math.min(100, paneCpu)]);
+    setMemH(h => [...h.slice(-(HISTORY - 1)), Math.min(100, (paneMemMb / 1024) * 100)]);
+  }, [stats, paneCpu, paneMemMb]);
 
-  const cpuVal: string | null = cpuH.length > 0 ? cpuH[cpuH.length - 1]!.toFixed(0) : null;
-  const memGb: number = stats?.mem_used_gb ?? 0;
-  const memVal: string = memGb < 10 ? memGb.toFixed(1) : Math.round(memGb).toString();
-  const processes: StatsProcess[] | null = stats?.processes ?? null;
+  const cpuVal: string | null = stats ? paneCpu.toFixed(0) : null;
+  const memVal: string = paneMemMb >= 1024
+    ? (paneMemMb / 1024).toFixed(1)
+    : Math.round(paneMemMb).toString();
+  const memUnit: string = paneMemMb >= 1024 ? 'G' : 'M';
   const procCount: number | null = processes?.length ?? null;
 
-  const hasStats = cpuVal !== null;
+  // Only show CPU/MEM widgets when the pane actually has running child processes.
+  // An idle shell prompt has no children and would otherwise render a permanent 0% / 0M.
+  const hasStats = (procCount ?? 0) > 0;
   const hasExtra = (procCount !== null && procCount > 0) || sessionUrls.length > 0;
 
   return (
@@ -706,16 +709,16 @@ export default function StatChips({ sessionId, send }: StatChipsProps): React.Re
               <button
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
-                  borderRadius: 4,
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px',
+                  borderRadius: 4, lineHeight: 1,
                 }}
                 className="hover:bg-white/5"
-                title="System stats"
+                title="Pane stats (sum of this pane's child processes)"
               >
                 {hasStats && (
                   <>
-                    <StatWidget label="CPU" value={cpuVal!} unit="%" history={cpuH} color={Number(cpuVal!) >= 95 ? '#F87171' : Number(cpuVal!) >= 80 ? '#FACC15' : '#4ADE80'} />
-                    <StatWidget label="MEM" value={memVal} unit="G" history={memH} color="#4ADE80" />
+                    <StatWidget label="CPU" value={cpuVal!} unit="%" history={cpuH} color={paneCpu >= 95 ? '#F87171' : paneCpu >= 80 ? '#FACC15' : '#4ADE80'} />
+                    <StatWidget label="MEM" value={memVal} unit={memUnit} history={memH} color="#4ADE80" />
                   </>
                 )}
                 {sessionUrls.length > 0 && (

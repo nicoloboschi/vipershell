@@ -18,10 +18,11 @@ cleanup() {
   kill "$BACKEND_PID" "$VITE_PID" 2>/dev/null || true
   wait "$BACKEND_PID" "$VITE_PID" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup INT TERM
 
 # Backend on port 4445 (API + WebSocket)
-NODE_ENV=development npx tsx watch src/index.ts --port 4445 --log-level debug &
+# --ignore to prevent unnecessary restarts that kill active PTY sessions
+NODE_ENV=development npx tsx watch --clear-screen=false --ignore 'ui/**' --ignore 'bench/**' --ignore '*.md' --ignore 'branding-preview.html' src/index.ts --port 4445 --log-level debug &
 BACKEND_PID=$!
 
 # Vite dev server on port 4444 (UI + HMR, proxies /api and /ws to backend)
