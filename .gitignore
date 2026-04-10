@@ -7,3 +7,8 @@ ui/node_modules/
 .env
 .env.*
 .npmrc
+
+# Local dev scratch — benchmarks, preview pages, ad-hoc screenshots.
+bench/
+branding-preview.html
+Screenshot *.png
